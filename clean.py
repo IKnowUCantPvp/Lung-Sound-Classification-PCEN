@@ -131,5 +131,5 @@ if __name__ == '__main__':
                         help='threshold magnitude for np.int16 dtype')
     args, _ = parser.parse_known_args()
 
-    test_threshold(args)
+    #test_threshold(args)
     split_wavs(args)
