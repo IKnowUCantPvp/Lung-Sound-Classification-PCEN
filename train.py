@@ -111,7 +111,7 @@ if __name__ == '__main__':
                         help='directory of audio files in total duration')
     parser.add_argument('--batch_size', type=int, default=16,
                         help='batch size')
-    parser.add_argument('--delta_time', '-dt', type=float, default=1.0,
+    parser.add_argument('--delta_time', '-dt', type=float, default=5.0,
                         help='time in seconds to sample audio')
     parser.add_argument('--sample_rate', '-sr', type=int, default=16000,
                         help='sample rate of clean audio')
