@@ -5,180 +5,128 @@ import os
 from glob import glob
 import numpy as np
 import pandas as pd
-from librosa.core import resample, to_mono
 from tqdm import tqdm
 import wavio
 
 
-def envelope(y, rate, threshold):
-    mask = []
-    y = pd.Series(y).apply(np.abs)
-    y_mean = y.rolling(window=int(rate / 20),
-                       min_periods=1,
-                       center=True).max()
-    for mean in y_mean:
-        if mean > threshold:
-            mask.append(True)
-        else:
-            mask.append(False)
-    return mask, y_mean
+def downsample_mono(path):
+    """
+    Convert to mono while preserving original sample rate and data type.
+    """
+    try:
+        obj = wavio.read(path)
+        wav = obj.data
+        rate = obj.rate
 
+        # Convert to float32 for processing
+        wav = wav.astype(np.float32)
 
-def downsample_mono(path, sr):
-    obj = wavio.read(path)
-    wav = obj.data.astype(np.float32, order='F')
-    rate = obj.rate
+        # Convert to mono if needed (average channels)
+        if wav.ndim > 1:
+            wav = np.mean(wav, axis=1)
 
-    # Ensure wav is 1D (mono)
-    if wav.ndim > 1:  # Stereo audio
-        wav = to_mono(wav.T)  # Convert to mono
-    else:  # Already mono, flatten if needed
-        wav = wav.flatten()
+        # Normalize to prevent clipping
+        if np.max(np.abs(wav)) > 0:
+            wav = wav / np.max(np.abs(wav))
 
-    # Resample the audio
-    wav = resample(wav, orig_sr=rate, target_sr=sr)  # Proper resample call
-    wav = wav.astype(np.int16)  # Convert back to int16 for saving
-    return sr, wav
+        # Convert back to original data type range
+        if obj.sampwidth == 1:
+            wav = (wav * 127 + 128).astype(np.uint8)
+        elif obj.sampwidth == 2:
+            wav = (wav * 32767).astype(np.int16)
+        elif obj.sampwidth == 3 or obj.sampwidth == 4:
+            wav = (wav * 2147483647).astype(np.int32)
 
+        return rate, wav
 
-# def downsample_mono(path, sr):
-#     obj = wavio.read(path)
-#     wav = obj.data.astype(np.float32, order='F')
-#     rate = obj.rate
-#     try:
-#         channel = wav.shape[1]
-#         if channel == 2:
-#             wav = to_mono(wav.T)
-#         elif channel == 1:
-#             wav = to_mono(wav.reshape(-1))
-#     except IndexError:
-#         wav = to_mono(wav.reshape(-1))
-#         pass
-#     except Exception as exc:
-#         raise exc
-#     wav = resample(wav, rate, sr)
-#     wav = wav.astype(np.int16)
-#     return sr, wav
+    except Exception as e:
+        print(f"Error processing file {path}: {str(e)}")
+        return None, None
 
 
 def save_sample(sample, rate, target_dir, fn, ix):
+    """Save audio segment with proper data type handling"""
     fn = fn.split('.wav')[0]
-    dst_path = os.path.join(target_dir.split('.')[0], fn + '_{}.wav'.format(str(ix)))
+    dst_path = os.path.join(target_dir, fn + '_{}.wav'.format(str(ix)))
     if os.path.exists(dst_path):
         return
+
+    # Ensure the data type is appropriate for WAV
+    if sample.dtype == np.float32 or sample.dtype == np.float64:
+        sample = np.int16(sample * 32767)
+
     wavfile.write(dst_path, rate, sample)
 
 
 def check_dir(path):
     if os.path.exists(path) is False:
-        os.mkdir(path)
+        os.makedirs(path, exist_ok=True)
 
 
 def split_wavs(args):
     src_root = args.src_root
     dst_root = args.dst_root
     dt = args.delta_time
+    overlap_percent = args.overlap
 
-    wav_paths = glob('{}/**'.format(src_root), recursive=True)
-    wav_paths = [x for x in wav_paths if '.wav' in x]
-    dirs = os.listdir(src_root)
+    wav_paths = glob(os.path.join(src_root, '**', '*.wav'), recursive=True)
     check_dir(dst_root)
-    classes = os.listdir(src_root)
+
+    # Get immediate subdirectories only
+    classes = [d for d in os.listdir(src_root)
+               if os.path.isdir(os.path.join(src_root, d))]
+
     for _cls in classes:
         src_dir = os.path.join(src_root, _cls)
-        # Skip files like `.DS_Store`
-        if not os.path.isdir(src_dir):
-            continue
         target_dir = os.path.join(dst_root, _cls)
         check_dir(target_dir)
-        for fn in tqdm(os.listdir(src_dir)):
-            if not fn.endswith('.wav'):  # Skip non-audio files
+
+        wav_files = [f for f in os.listdir(src_dir) if f.endswith('.wav')]
+
+        for fn in tqdm(wav_files):
+            src_fn = os.path.join(src_dir, fn)
+            rate, wav = downsample_mono(src_fn)
+
+            if rate is None or wav is None:
+                print(f"Skipping file {src_fn} due to processing error")
                 continue
 
-            src_fn = os.path.join(src_dir, fn)
-            rate, wav = downsample_mono(src_fn, args.sr)
-            mask, y_mean = envelope(wav, rate, threshold=args.threshold)
-            wav = wav[mask]
-            delta_sample = int(dt * rate)
+            # Calculate window and hop size with overlap
+            window_size = int(dt * rate)
+            hop_size = int(window_size * (1 - overlap_percent / 100))
 
-            if wav.shape[0] < delta_sample:
-                sample = np.zeros(shape=(delta_sample,), dtype=np.int16)
+            if wav.shape[0] < window_size:
+                # If audio is shorter than window_size, pad with zeros
+                sample = np.zeros(shape=(window_size,), dtype=wav.dtype)
                 sample[:wav.shape[0]] = wav
                 save_sample(sample, rate, target_dir, fn, 0)
             else:
-                trunc = wav.shape[0] % delta_sample
-                for cnt, i in enumerate(np.arange(0, wav.shape[0] - trunc, delta_sample)):
-                    start = int(i)
-                    stop = int(i + delta_sample)
-                    sample = wav[start:stop]
-                    save_sample(sample, rate, target_dir, fn, cnt)
+                # Create overlapping windows
+                for cnt, i in enumerate(range(0, wav.shape[0] - window_size + 1, hop_size)):
+                    start = i
+                    stop = i + window_size
 
-    # for _cls in classes:
-    #     target_dir = os.path.join(dst_root, _cls)
-    #     check_dir(target_dir)
-    #     src_dir = os.path.join(src_root, _cls)
-    #     for fn in tqdm(os.listdir(src_dir)):
-    #         src_fn = os.path.join(src_dir, fn)
-    #         rate, wav = downsample_mono(src_fn, args.sr)
-    #         mask, y_mean = envelope(wav, rate, threshold=args.threshold)
-    #         wav = wav[mask]
-    #         delta_sample = int(dt*rate)
+                    if stop <= wav.shape[0]:
+                        sample = wav[start:stop]
+                        save_sample(sample, rate, target_dir, fn, cnt)
 
-    #         # cleaned audio is less than a single sample
-    #         # pad with zeros to delta_sample size
-    #         if wav.shape[0] < delta_sample:
-    #             sample = np.zeros(shape=(delta_sample,), dtype=np.int16)
-    #             sample[:wav.shape[0]] = wav
-    #             save_sample(sample, rate, target_dir, fn, 0)
-    #         # step through audio and save every delta_sample
-    #         # discard the ending audio if it is too short
-    #         else:
-    #             trunc = wav.shape[0] % delta_sample
-    #             for cnt, i in enumerate(np.arange(0, wav.shape[0]-trunc, delta_sample)):
-    #                 start = int(i)
-    #                 stop = int(i + delta_sample)
-    #                 sample = wav[start:stop]
-    #                 save_sample(sample, rate, target_dir, fn, cnt)
-
-
-def test_threshold(args):
-    src_root = args.src_root
-    wav_paths = glob('{}/**'.format(src_root), recursive=True)
-    wav_path = [x for x in wav_paths if args.fn in x]
-    if len(wav_path) != 1:
-        print('audio file not found for sub-string: {}'.format(args.fn))
-        return
-    rate, wav = downsample_mono(wav_path[0], args.sr)
-    mask, env = envelope(wav, rate, threshold=args.threshold)
-    plt.style.use('ggplot')
-    plt.title('Signal Envelope, Threshold = {}'.format(str(args.threshold)))
-    plt.plot(wav[np.logical_not(mask)], color='r', label='remove')
-    plt.plot(wav[mask], color='c', label='keep')
-    plt.plot(env, color='m', label='envelope')
-    plt.grid(False)
-    plt.legend(loc='best')
-    plt.show()
+                # Handle the last window if there's remaining audio
+                if stop < wav.shape[0]:
+                    last_start = wav.shape[0] - window_size
+                    last_sample = wav[last_start:]
+                    save_sample(last_sample, rate, target_dir, fn, cnt + 1)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Cleaning audio data')
-    parser.add_argument('--src_root', type=str,
-                        default='/Users/samer/Library/CloudStorage/OneDrive-Personal/SamerISEF2024/Audio-Classification-master/wavfiles',
+    parser = argparse.ArgumentParser(description='Splitting audio data')
+    parser.add_argument('--src_root', type=str, default='wavfiles',
                         help='directory of audio files in total duration')
     parser.add_argument('--dst_root', type=str, default='clean',
                         help='directory to put audio files split by delta_time')
     parser.add_argument('--delta_time', '-dt', type=float, default=5.0,
                         help='time in seconds to sample audio')
-    parser.add_argument('--sr', type=int, default=16000,  # think about that
-                        help='rate to downsample audio')
-
-    parser.add_argument('--fn', type=str, default='3a3d0279',
-                        help='file to plot over time to check magnitude')
-    parser.add_argument('--threshold', type=str, default=20,
-                        help='threshold magnitude for np.int16 dtype')
+    parser.add_argument('--overlap', type=float, default=50.0,
+                        help='percentage of overlap between windows (0-100)')
     args, _ = parser.parse_known_args()
 
-    # test_threshold(args)
     split_wavs(args)
-
-print("end")
