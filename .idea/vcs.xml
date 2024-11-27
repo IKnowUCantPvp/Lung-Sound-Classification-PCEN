@@ -2,5 +2,6 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/Detecting-Respiratory-Diseases-from-Recorded-Lung-Sounds-by-2D-CNN" vcs="Git" />
   </component>
 </project>
