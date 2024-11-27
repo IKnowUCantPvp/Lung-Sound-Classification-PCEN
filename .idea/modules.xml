@@ -2,7 +2,6 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/Detecting-Respiratory-Diseases-from-Recorded-Lung-Sounds-by-2D-CNN/.idea/Detecting-Respiratory-Diseases-from-Recorded-Lung-Sounds-by-2D-CNN.iml" filepath="$PROJECT_DIR$/Detecting-Respiratory-Diseases-from-Recorded-Lung-Sounds-by-2D-CNN/.idea/Detecting-Respiratory-Diseases-from-Recorded-Lung-Sounds-by-2D-CNN.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/audioClassificationLungSounds.iml" filepath="$PROJECT_DIR$/.idea/audioClassificationLungSounds.iml" />
     </modules>
   </component>
