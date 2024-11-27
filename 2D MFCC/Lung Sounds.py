@@ -1,3 +1,4 @@
+#some major error here for some reason. dont know how to fix it. please look at it samer.
 #!/usr/bin/env python
 # coding: utf-8
 
