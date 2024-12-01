@@ -41,7 +41,7 @@ def Conv1D(N_CLASSES=10, SR=16000, DT=1.0):
     return model
 
 
-def Conv2D(N_CLASSES=10, SR=16000, DT=1.0):
+def Conv2DSpec(N_CLASSES=6, SR=8000, DT=6.0):
     input_shape = (int(SR*DT), 1)
     i = get_melspectrogram_layer(input_shape=input_shape,
                                  n_mels=128,
@@ -71,6 +71,83 @@ def Conv2D(N_CLASSES=10, SR=16000, DT=1.0):
     model.compile(optimizer='adam',
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
+    return model
+
+
+from tensorflow.keras import layers
+from tensorflow.keras.layers import TimeDistributed, LayerNormalization
+from tensorflow.keras.models import Model
+from tensorflow.keras.regularizers import l2
+
+
+def Conv2DMFCC(input_shape, n_classes=6):
+    """
+    Create CNN model for MFCC features with exactly the same architecture as Conv2DSpec
+    """
+    inputs = layers.Input(shape=(*input_shape, 1))
+
+    # Exactly matching Conv2DSpec layers
+    x = LayerNormalization(axis=2, name='batch_norm')(inputs)
+    x = layers.Conv2D(8, kernel_size=(7, 7), activation='tanh', padding='same', name='conv2d_tanh')(x)
+    x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_1')(x)
+
+    x = layers.Conv2D(16, kernel_size=(5, 5), activation='relu', padding='same', name='conv2d_relu_1')(x)
+    x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_2')(x)
+
+    x = layers.Conv2D(16, kernel_size=(3, 3), activation='relu', padding='same', name='conv2d_relu_2')(x)
+    x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_3')(x)
+
+    x = layers.Conv2D(32, kernel_size=(3, 3), activation='relu', padding='same', name='conv2d_relu_3')(x)
+    x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_4')(x)
+
+    x = layers.Conv2D(32, kernel_size=(3, 3), activation='relu', padding='same', name='conv2d_relu_4')(x)
+    x = layers.Flatten(name='flatten')(x)
+    x = layers.Dropout(rate=0.2, name='dropout')(x)
+    x = layers.Dense(64, activation='relu', activity_regularizer=l2(0.001), name='dense')(x)
+    outputs = layers.Dense(n_classes, activation='softmax', name='softmax')(x)
+
+    # Create and compile model with same settings
+    model = Model(inputs=inputs, outputs=outputs, name='2d_convolution')
+    model.compile(optimizer='adam',
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    return model
+
+
+def Conv2DPCEN(N_CLASSES=6, SR=8000, DT=6.0):
+    """
+    Modified Conv2DPCEN model with fixed normalization axis and proper input handling
+    """
+    # Calculate exact input shape
+    n_mels = 128
+    hop_length = 160
+    time_dims = 1 + (int(SR * DT) // hop_length)
+    input_shape = (n_mels, time_dims, 1)
+
+    inputs = layers.Input(shape=input_shape)
+
+    # Change normalization axis to -1 (channel axis)
+    x = LayerNormalization(axis=-1, name='batch_norm')(inputs)
+    x = layers.Conv2D(8, kernel_size=(7, 7), activation='tanh', padding='same', name='conv2d_tanh')(x)
+    x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_1')(x)
+    x = layers.Conv2D(16, kernel_size=(5, 5), activation='relu', padding='same', name='conv2d_relu_1')(x)
+    x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_2')(x)
+    x = layers.Conv2D(16, kernel_size=(3, 3), activation='relu', padding='same', name='conv2d_relu_2')(x)
+    x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_3')(x)
+    x = layers.Conv2D(32, kernel_size=(3, 3), activation='relu', padding='same', name='conv2d_relu_3')(x)
+    x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_4')(x)
+    x = layers.Conv2D(32, kernel_size=(3, 3), activation='relu', padding='same', name='conv2d_relu_4')(x)
+    x = layers.Flatten(name='flatten')(x)
+    x = layers.Dropout(rate=0.2, name='dropout')(x)
+    x = layers.Dense(64, activation='relu', activity_regularizer=l2(0.001), name='dense')(x)
+    outputs = layers.Dense(N_CLASSES, activation='softmax', name='softmax')(x)
+
+    model = Model(inputs=inputs, outputs=outputs, name='2d_convolution_pcen')
+    model.compile(optimizer='adam',
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+
     return model
 
 
