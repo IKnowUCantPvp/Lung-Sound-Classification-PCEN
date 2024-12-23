@@ -25,7 +25,7 @@ class AudioParameters:
         self.res_type = 'kaiser_fast'  # Efficient resampling algorithm
 
         # MFCC extraction parameters
-        self.n_mfcc = 13  # Standard for biomedical acoustic analysis
+        self.n_mfcc = 40  # Standard for biomedical acoustic analysis
         self.n_fft = 1024  # ~128ms window for good frequency resolution
         self.hop_length = 512  # 75% overlap between frames
         self.n_mels = 40  # Focused on lower frequencies relevant to lung sounds

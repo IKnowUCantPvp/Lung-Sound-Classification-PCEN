@@ -17,7 +17,7 @@ import warnings
 
 class DataGenerator(tf.keras.utils.Sequence):
     def __init__(self, wav_paths, labels, sr, dt, n_classes,
-                 batch_size=32, shuffle=True, augmentation=False, ):
+                 batch_size, shuffle=True, augmentation=False, ):
         self.wav_paths = wav_paths
         self.labels = labels
         self.sr = sr
