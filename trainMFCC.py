@@ -102,7 +102,7 @@ if __name__ == '__main__':
                         help='directory containing processed MFCC features')
     parser.add_argument('--batch_size', type=int, default=16,
                         help='batch size')
-    parser.add_argument('--epochs', type=int, default=1,
+    parser.add_argument('--epochs', type=int, default=50,
                         help='number of epochs to train')
     args, _ = parser.parse_known_args()
 

@@ -100,7 +100,7 @@ def generate_spectrograms(audio_path, output_dir, sr=8000, n_mels=128,
 
 if __name__ == "__main__":
     # Set your paths here
-    audio_file = "clean/Healthy/102_1b1_Ar_sc_Meditron_0.wav"  # Change this to your WAV file path
+    audio_file = "clean/Healthy/102_1b1_Ar_sc_Meditron_original_0.wav"  # Change this to your WAV file path
     output_directory = "images"  # Where to save the spectrograms
 
     print(f"Processing file: {audio_file}")

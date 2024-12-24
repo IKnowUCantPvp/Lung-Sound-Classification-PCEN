@@ -17,7 +17,7 @@ import warnings
 
 class DataGenerator(tf.keras.utils.Sequence):
     def __init__(self, wav_paths, labels, sr, dt, n_classes,
-                 batch_size=32, shuffle=True, augmentation=False, ):
+                 batch_size, shuffle=True, augmentation=False, ):
         self.wav_paths = wav_paths
         self.labels = labels
         self.sr = sr
@@ -29,31 +29,33 @@ class DataGenerator(tf.keras.utils.Sequence):
 
 
     def __len__(self):
-        return int(np.floor(len(self.wav_paths) / self.batch_size))
+        return int(np.floor(len(self.wav_paths) / self.batch_size)) #total number of batches
 
 
     def __getitem__(self, index):
-        indexes = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
+        indexes = self.indexes[index*self.batch_size:(index+1)*self.batch_size] #indexes is equal to where you are in the batch.
 
-        wav_paths = [self.wav_paths[k] for k in indexes]
+        wav_paths = [self.wav_paths[k] for k in indexes] #gets the associated wav paths and labels from the indexes that are being used
         labels = [self.labels[k] for k in indexes]
 
-        # generate a batch of time data
+        # make an empty dataset for both X and Y
         X = np.empty((self.batch_size, int(self.sr*self.dt), 1), dtype=np.float32)
         Y = np.empty((self.batch_size, self.n_classes), dtype=np.float32)
 
-        for i, (path, label) in enumerate(zip(wav_paths, labels)):
-            rate, wav = wavfile.read(path)
-            X[i,] = wav.reshape(-1, 1)
-            Y[i,] = to_categorical(label, num_classes=self.n_classes)
+
+        for i, (path, label) in enumerate(zip(wav_paths, labels)): #for loop that gets the path and label from the wav_paths and labels
+            rate, wav = wavfile.read(path)                         #extracts the rate and wav as in sr*d (8000*6)
+            X[i,] = wav.reshape(-1, 1)                             #puts the wav (sr*d) into the batch index and makes the channel 1
+            Y[i,] = to_categorical(label, num_classes=self.n_classes) #puts the label into onehotencoded format)
 
         return X, Y
 
 
     def on_epoch_end(self):
-        self.indexes = np.arange(len(self.wav_paths))
-        if self.shuffle:
+        self.indexes = np.arange(len(self.wav_paths))  #this shuffles the original indexes if you have shuffle on.
+        if self.shuffle:                               #it basically resets the entire indexes then shuffles them
             np.random.shuffle(self.indexes)
+
 
 
 def train(args):
@@ -77,7 +79,8 @@ def train(args):
     le = LabelEncoder()
     le.fit(classes)
     labels = [os.path.split(x)[0].split('/')[-1] for x in wav_paths]
-    labels = le.transform(labels)
+    labels = le.transform(labels) #puts the labels into number format)
+
     wav_train, wav_val, label_train, label_val = train_test_split(wav_paths,
                                                                   labels,
                                                                   test_size=0.1,
@@ -99,7 +102,7 @@ def train(args):
                          mode='auto', save_freq='epoch', verbose=1)
     csv_logger = CSVLogger(csv_path, append=False)
     model.fit(tg, validation_data=vg,
-              epochs=1, verbose=1,
+              epochs=100, verbose=1,
               callbacks=[csv_logger, cp])
 
 if __name__ == '__main__':
@@ -118,4 +121,5 @@ if __name__ == '__main__':
     args, _ = parser.parse_known_args()
 
     train(args)
+
 
