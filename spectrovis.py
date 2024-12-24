@@ -5,6 +5,7 @@ import numpy as np
 import os
 
 
+
 def generate_spectrograms(audio_path, output_dir, sr=8000, n_mels=128,
                           hop_length=160, n_fft=512):
     """
