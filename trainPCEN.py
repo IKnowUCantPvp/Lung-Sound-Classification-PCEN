@@ -106,7 +106,7 @@ def train(args):
 
     # Modify the model.fit() call to include the pcen_monitor in callbacks
     model.fit(tg, validation_data=vg,
-              epochs=1, verbose=1,
+              epochs=100, verbose=1,
               callbacks=[csv_logger, cp, pcen_monitor])
 
 
