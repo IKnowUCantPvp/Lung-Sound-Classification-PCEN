@@ -1,2 +1,7 @@
 *.wav filter=lfs diff=lfs merge=lfs -text
 C:/Users/natha/OneDrive/Documents/GitHub/Audio-Classification/CleanedSeperatedAugmented[[:space:]](final[[:space:]]product) filter=lfs diff=lfs merge=lfs -text
+<<<<<<< HEAD
+2D-MFCC/features.npy filter=lfs diff=lfs merge=lfs -text
+=======
+>>>>>>> c6df1b9e9d611e202149ec3da27676ce8fadd998
+*.npy filter=lfs diff=lfs merge=lfs -text
