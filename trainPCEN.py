@@ -96,7 +96,7 @@ def train(args):
     vg = DataGenerator(wav_val, label_val, sr, dt,
                            params['N_CLASSES'], batch_size=batch_size)
 
-    model = Conv2DOldPCEN(**params)
+    model = Conv2DPCEN(**params)
 
     cp = ModelCheckpoint('models/{}.h5'.format(model_type), monitor='val_loss',
                          save_best_only=True, save_weights_only=False,
@@ -113,7 +113,7 @@ def train(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Audio Classification Training')
-    parser.add_argument('--model_type', type=str, default='conv2doldpcen',
+    parser.add_argument('--model_type', type=str, default='conv2dpcen',
                         help='model to run. i.e. conv1d, conv2d, lstm')
     parser.add_argument('--src_root', type=str, default='clean',
                         help='directory of audio files in total duration')

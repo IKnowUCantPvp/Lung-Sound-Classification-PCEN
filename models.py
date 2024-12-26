@@ -81,19 +81,18 @@ from tensorflow.keras.regularizers import l2
 
 def Conv2DOldPCEN(N_CLASSES=6, SR=8000, DT=6.0):
     """
-    Modified Conv2DPCEN model using librosa for mel spectrogram and PCEN computation
+    Modified Conv2DPCEN model with fixed normalization axis and proper input handling
     """
-    # Calculate input length in samples
-    input_length = int(SR * DT)
+    # Calculate exact input shape
+    n_mels = 128
+    hop_length = 160
+    time_dims = 1 + (int(SR * DT) // hop_length)
+    input_shape = (n_mels, time_dims, 1)
 
-    # Define model
-    inputs = layers.Input(shape=(input_length,))  # Now accepting raw audio
+    inputs = layers.Input(shape=input_shape)
 
-    # Add our combined mel spectrogram + PCEN layer
-    x = LibrosaPCENLayer(sr=SR)(inputs)
-
-    # Continue with your existing architecture
-    x = LayerNormalization(axis=-1, name='batch_norm')(x)
+    # Change normalization axis to -1 (channel axis)
+    x = LayerNormalization(axis=-1, name='batch_norm')(inputs)
     x = layers.Conv2D(8, kernel_size=(7, 7), activation='tanh', padding='same', name='conv2d_tanh')(x)
     x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_1')(x)
     x = layers.Conv2D(16, kernel_size=(5, 5), activation='relu', padding='same', name='conv2d_relu_1')(x)
@@ -114,6 +113,8 @@ def Conv2DOldPCEN(N_CLASSES=6, SR=8000, DT=6.0):
                   metrics=['accuracy'])
 
     return model
+
+
 
 
 
