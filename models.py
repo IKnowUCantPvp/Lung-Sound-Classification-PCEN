@@ -6,7 +6,7 @@ import kapre
 from kapre.composed import get_melspectrogram_layer
 import tensorflow as tf
 import os
-
+from PCENLayer import PCENLayer
 
 def Conv1D(N_CLASSES=10, SR=16000, DT=1.0):
     input_shape = (int(SR*DT), 1)
@@ -79,21 +79,36 @@ from tensorflow.keras.layers import TimeDistributed, LayerNormalization
 from tensorflow.keras.models import Model
 from tensorflow.keras.regularizers import l2
 
+
 def Conv2DOldPCEN(N_CLASSES=6, SR=8000, DT=6.0):
-    """
-    Modified Conv2DPCEN model using librosa for mel spectrogram and PCEN computation
-    """
-    # Calculate input length in samples
-    input_length = int(SR * DT)
+    input_shape = (int(SR * DT), 1)
 
-    # Define model
-    inputs = layers.Input(shape=(input_length,))  # Now accepting raw audio
+    # Get the base mel spectrogram layer without decibel conversion
+    i = get_melspectrogram_layer(input_shape=input_shape,
+                                 n_mels=128,
+                                 pad_end=True,
+                                 n_fft=512,
+                                 win_length=400,
+                                 hop_length=160,
+                                 sample_rate=SR,
+                                 return_decibel=False,  # No dB conversion before PCEN
+                                 input_data_format='channels_last',
+                                 output_data_format='channels_last')
 
-    # Add our combined mel spectrogram + PCEN layer
-    x = LibrosaPCENLayer(sr=SR)(inputs)
+    # Apply PCEN
+    x = PCENLayer(
+        alpha=0.98,
+        smooth_coef=0.04,
+        delta=2.0,
+        root=0.5,
+        trainable=False,
+        name='pcen'
+    )(i.output)
 
-    # Continue with your existing architecture
-    x = LayerNormalization(axis=-1, name='batch_norm')(x)
+    # Keep LayerNorm after PCEN
+    x = LayerNormalization(axis=2, name='batch_norm')(x)
+
+    # Rest of the model remains exactly the same
     x = layers.Conv2D(8, kernel_size=(7, 7), activation='tanh', padding='same', name='conv2d_tanh')(x)
     x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_1')(x)
     x = layers.Conv2D(16, kernel_size=(5, 5), activation='relu', padding='same', name='conv2d_relu_1')(x)
@@ -106,14 +121,15 @@ def Conv2DOldPCEN(N_CLASSES=6, SR=8000, DT=6.0):
     x = layers.Flatten(name='flatten')(x)
     x = layers.Dropout(rate=0.2, name='dropout')(x)
     x = layers.Dense(64, activation='relu', activity_regularizer=l2(0.001), name='dense')(x)
-    outputs = layers.Dense(N_CLASSES, activation='softmax', name='softmax')(x)
+    o = layers.Dense(N_CLASSES, activation='softmax', name='softmax')(x)
 
-    model = Model(inputs=inputs, outputs=outputs, name='2d_convolution_pcen')
+    model = Model(inputs=i.input, outputs=o, name='2d_convolution_pcen')
     model.compile(optimizer='adam',
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
-
     return model
+
+
 
 
 
