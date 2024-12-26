@@ -14,13 +14,11 @@ from glob import glob
 import argparse
 import warnings
 import librosa
-from monitorPCEN import PCENParameterMonitor
 from models import Conv2DOldPCEN
-
 
 class DataGenerator(tf.keras.utils.Sequence):
     def __init__(self, wav_paths, labels, sr, dt, n_classes,
-                 batch_size, shuffle=True):
+                 batch_size=32, shuffle=True):
         self.wav_paths = wav_paths
         self.labels = labels
         self.sr = sr
@@ -28,27 +26,53 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.n_classes = n_classes
         self.batch_size = batch_size
         self.shuffle = True
+
+        # Fixed parameters for feature extraction
         self.n_mels = 128
         self.hop_length = 160
-        self.n_fft = 512  # Same as reference model
+        self.n_fft = 512
+
+        # Pre-calculate the time dimension after STFT
+        self.time_dims = 1 + (int(self.sr * self.dt) // self.hop_length)
+
         self.on_epoch_end()
 
     def __len__(self):
-        return int(np.floor(len(self.wav_paths) / self.batch_size))  # Using floor like reference
+        return int(np.floor(len(self.wav_paths) / self.batch_size))
 
     def __getitem__(self, index):
-        indexes = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
+        indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]
         wav_paths = [self.wav_paths[k] for k in indexes]
         labels = [self.labels[k] for k in indexes]
 
-        # Match the reference model's shape
-        X = np.empty((self.batch_size, int(self.sr*self.dt), 1), dtype=np.float32)
-        Y = np.empty((self.batch_size, self.n_classes), dtype=np.float32)
+        # Initialize batch arrays with fixed dimensions
+        X = np.zeros((self.batch_size, self.n_mels, self.time_dims, 1), dtype=np.float32)
+        Y = np.zeros((self.batch_size, self.n_classes), dtype=np.float32)
 
         for i, (path, label) in enumerate(zip(wav_paths, labels)):
-            rate, wav = wavfile.read(path)  # Using wavfile.read like reference
-            X[i,] = wav.reshape(-1, 1)
-            Y[i,] = to_categorical(label, num_classes=self.n_classes)
+            # Load and pad/truncate audio
+            wav, _ = librosa.load(path, sr=self.sr, duration=self.dt)
+            if len(wav) < int(self.sr * self.dt):
+                wav = np.pad(wav, (0, int(self.sr * self.dt) - len(wav)))
+            else:
+                wav = wav[:int(self.sr * self.dt)]
+
+            # Compute mel spectrogram
+            mel_spec = librosa.feature.melspectrogram(
+                y=wav,
+                sr=self.sr,
+                n_mels=self.n_mels,
+                n_fft=self.n_fft,
+                hop_length=self.hop_length
+            )
+
+            # Apply PCEN
+            pcen = librosa.pcen(mel_spec, sr=self.sr)
+
+            # Ensure correct shape and add channel dimension
+            pcen = pcen[:, :self.time_dims]
+            X[i] = np.expand_dims(pcen, axis=-1)
+            Y[i] = to_categorical(label, num_classes=self.n_classes)
 
         return X, Y
 
@@ -96,24 +120,21 @@ def train(args):
     vg = DataGenerator(wav_val, label_val, sr, dt,
                            params['N_CLASSES'], batch_size=batch_size)
 
-    model = Conv2DPCEN(**params)
+    model = Conv2DOldPCEN(**params)
 
     cp = ModelCheckpoint('models/{}.h5'.format(model_type), monitor='val_loss',
                          save_best_only=True, save_weights_only=False,
                          mode='auto', save_freq='epoch', verbose=1)
     csv_logger = CSVLogger(csv_path, append=False)
 
-    pcen_monitor = PCENParameterMonitor(log_file='logs/pcen_parameters.csv')
-
-    # Modify the model.fit() call to include the pcen_monitor in callbacks
     model.fit(tg, validation_data=vg,
-              epochs=1, verbose=1,
-              callbacks=[csv_logger, cp, pcen_monitor])
+              epochs=100, verbose=1,
+              callbacks=[csv_logger, cp])
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Audio Classification Training')
-    parser.add_argument('--model_type', type=str, default='conv2dpcen',
+    parser.add_argument('--model_type', type=str, default='conv2doldpcen',
                         help='model to run. i.e. conv1d, conv2d, lstm')
     parser.add_argument('--src_root', type=str, default='clean',
                         help='directory of audio files in total duration')
