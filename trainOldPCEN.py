@@ -25,16 +25,8 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.dt = dt
         self.n_classes = n_classes
         self.batch_size = batch_size
-        self.shuffle = True
-
-        # Fixed parameters for feature extraction
-        self.n_mels = 128
-        self.hop_length = 160
-        self.n_fft = 512
-
-        # Pre-calculate the time dimension after STFT
-        self.time_dims = 1 + (int(self.sr * self.dt) // self.hop_length)
-
+        self.shuffle = shuffle
+        self.input_length = int(self.sr * self.dt)  # Samples per audio clip
         self.on_epoch_end()
 
     def __len__(self):
@@ -45,33 +37,20 @@ class DataGenerator(tf.keras.utils.Sequence):
         wav_paths = [self.wav_paths[k] for k in indexes]
         labels = [self.labels[k] for k in indexes]
 
-        # Initialize batch arrays with fixed dimensions
-        X = np.zeros((self.batch_size, self.n_mels, self.time_dims, 1), dtype=np.float32)
+        # Batch arrays adapted for raw waveforms
+        X = np.zeros((self.batch_size, self.input_length, 1), dtype=np.float32)
         Y = np.zeros((self.batch_size, self.n_classes), dtype=np.float32)
 
         for i, (path, label) in enumerate(zip(wav_paths, labels)):
-            # Load and pad/truncate audio
-            wav, _ = librosa.load(path, sr=self.sr, duration=self.dt)
-            if len(wav) < int(self.sr * self.dt):
-                wav = np.pad(wav, (0, int(self.sr * self.dt) - len(wav)))
+            # Load and pad/truncate raw audio waveform
+            wav, _ = librosa.load(path, sr=self.sr)
+            if len(wav) < self.input_length:
+                wav = np.pad(wav, (0, self.input_length - len(wav)))
             else:
-                wav = wav[:int(self.sr * self.dt)]
+                wav = wav[:self.input_length]
 
-            # Compute mel spectrogram
-            mel_spec = librosa.feature.melspectrogram(
-                y=wav,
-                sr=self.sr,
-                n_mels=self.n_mels,
-                n_fft=self.n_fft,
-                hop_length=self.hop_length
-            )
-
-            # Apply PCEN
-            pcen = librosa.pcen(mel_spec, sr=self.sr)
-
-            # Ensure correct shape and add channel dimension
-            pcen = pcen[:, :self.time_dims]
-            X[i] = np.expand_dims(pcen, axis=-1)
+            # Add channel dimension (as required by Kapre STFT)
+            X[i] = np.expand_dims(wav, axis=-1)  # Shape: (input_length, 1) for STFT
             Y[i] = to_categorical(label, num_classes=self.n_classes)
 
         return X, Y
@@ -80,6 +59,7 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.indexes = np.arange(len(self.wav_paths))
         if self.shuffle:
             np.random.shuffle(self.indexes)
+
 
 
 def train(args):
