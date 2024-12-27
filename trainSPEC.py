@@ -83,7 +83,7 @@ def train(args):
 
     wav_train, wav_val, label_train, label_val = train_test_split(wav_paths,
                                                                   labels,
-                                                                  test_size=0.1,
+                                                                  test_size=0.3,
                                                                   random_state=0)
 
     assert len(label_train) >= args.batch_size, 'Number of train samples must be >= batch_size'
@@ -97,12 +97,18 @@ def train(args):
     vg = DataGenerator(wav_val, label_val, sr, dt,
                        params['N_CLASSES'], batch_size=batch_size)
     model = models[model_type]
-    cp = ModelCheckpoint('models/{}.h5'.format(model_type), monitor='val_loss',
-                         save_best_only=True, save_weights_only=False,
-                         mode='auto', save_freq='epoch', verbose=1)
+    cp = ModelCheckpoint(
+        f'models/{model_type}',  # Remove .h5 extension
+        monitor='val_loss',
+        save_best_only=True,
+        save_weights_only=False,
+        mode='auto',
+        save_freq='epoch',
+        verbose=1
+    )
     csv_logger = CSVLogger(csv_path, append=False)
     model.fit(tg, validation_data=vg,
-              epochs=100, verbose=1,
+              epochs=1, verbose=1,
               callbacks=[csv_logger, cp])
 
 if __name__ == '__main__':
