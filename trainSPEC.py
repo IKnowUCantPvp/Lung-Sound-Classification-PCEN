@@ -83,7 +83,7 @@ def train(args):
 
     wav_train, wav_val, label_train, label_val = train_test_split(wav_paths,
                                                                   labels,
-                                                                  test_size=0.3,
+                                                                  test_size=0.2,
                                                                   random_state=0)
 
     assert len(label_train) >= args.batch_size, 'Number of train samples must be >= batch_size'

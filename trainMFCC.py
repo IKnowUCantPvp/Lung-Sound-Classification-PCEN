@@ -49,7 +49,7 @@ def train(args):
     features_train, features_val, label_train, label_val = train_test_split(
         features,
         labels,
-        test_size=0.3,
+        test_size=0.2,
         random_state=0
     )
 
