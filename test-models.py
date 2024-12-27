@@ -9,7 +9,7 @@ from sklearn.preprocessing import LabelEncoder
 from glob import glob
 from tqdm import tqdm
 import argparse
-
+import sys
 
 class AudioParameters:
     """
@@ -107,12 +107,34 @@ def extract_features(file_path, params):
         return None
 
 
-def test_models(args):
-    """Test trained models on new dataset"""
-    params = AudioParameters()
+def load_models(models_dir):
+    """
+    Load TensorFlow SavedModel models from the specified directory.
 
-    # Load models
+    Args:
+        models_dir (str): Directory containing the saved models.
+
+    Returns:
+        dict: A dictionary mapping model names to their loaded TensorFlow models.
+    """
     models = {}
+    for model_dir in glob(os.path.join(models_dir, '*')):
+        model_name = os.path.basename(model_dir)
+        try:
+            models[model_name] = tf.keras.models.load_model(model_dir)
+            print(f"Loaded model: {model_name}")
+        except Exception as e:
+            print(f"Error loading {model_name}: {str(e)}")
+    return models
+
+
+def test_models(args):
+    """
+    Test the loaded models on the new dataset.
+    """
+    params = AudioParameters()
+    models = load_models(args.models_dir)
+
     for model_path in glob(os.path.join(args.models_dir, '*.h5')):
         model_name = os.path.basename(model_path).replace('.h5', '')
         try:
@@ -206,8 +228,7 @@ if __name__ == '__main__':
 
     # Set up directory structure like in Lung-Sounds.py
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(current_dir)
-    args.data_dir = os.path.join(parent_dir, "newclean")
+    args.data_dir = os.path.join(current_dir, "newclean")
 
     if not os.path.exists(args.data_dir):
         print(f"\nERROR: Data directory not found: {args.data_dir}")
