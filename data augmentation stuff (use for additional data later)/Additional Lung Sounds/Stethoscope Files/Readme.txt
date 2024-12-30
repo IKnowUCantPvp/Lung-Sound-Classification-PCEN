@@ -1,0 +1,2 @@
+1. First four recordings from the file P1-P8.zsa were used for testing the stethoscope and should be ignored.
+2. The files are named by the included patient recordings and in order. For example P33-P40.zsa contains the recordings from patients P33 to P40 in that order from top to bottom. 
