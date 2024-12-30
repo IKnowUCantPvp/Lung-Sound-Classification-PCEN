@@ -7,3 +7,4 @@ C:/Users/natha/OneDrive/Documents/GitHub/Audio-Classification/CleanedSeperatedAu
 *.npy filter=lfs diff=lfs merge=lfs -text
 data-augmentation-stuff/* filter=lfs diff=lfs merge=lfs -text
 data-augmentation-stuff/** filter=lfs diff=lfs merge=lfs -text
+data[[:space:]]augmentation[[:space:]]stuff[[:space:]](use[[:space:]]for[[:space:]]additional[[:space:]]data[[:space:]]later)/** filter=lfs diff=lfs merge=lfs -text
