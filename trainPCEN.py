@@ -113,10 +113,11 @@ def train(args):
         verbose=1
     )
     csv_logger = CSVLogger(csv_path, append=False)
+    pcen_monitor = ImprovedPCENMonitor(log_file=f'logs/{model_type}_pcen_params.csv')
 
     model.fit(tg, validation_data=vg,
               epochs=4, verbose=1,
-              callbacks=[csv_logger, cp])
+              callbacks=[csv_logger, cp, pcen_monitor])
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Audio Classification Training')
