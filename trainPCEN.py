@@ -116,7 +116,7 @@ def train(args):
     pcen_monitor = ImprovedPCENMonitor(log_file=f'logs/{model_type}_pcen_params.csv')
 
     model.fit(tg, validation_data=vg,
-              epochs=4, verbose=1,
+              epochs=70, verbose=1,
               callbacks=[csv_logger, cp, pcen_monitor])
 
 if __name__ == '__main__':
