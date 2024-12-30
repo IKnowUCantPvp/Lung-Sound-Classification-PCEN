@@ -35,7 +35,7 @@ def organize_files(src_dir, dst_dir):
                 metadata = parse_filename(file)
                 if metadata:
                     # Map filter code to folder name
-                    filter_map = {"B": "Bell", "D": "Diaphragm", "E": "Extended"}
+                    filter_map = {"B": "Bell", "D": "DiaphragmWFilter (WITH FILTER STILL APPLIED)", "E": "Extended"}
                     filter_folder = filter_map.get(metadata["Filter"])
                     if not filter_folder:
                         print(f"Unknown filter for file: {file}")

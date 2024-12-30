@@ -123,9 +123,9 @@ def split_wavs(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Splitting audio data')
-    parser.add_argument('--src_root', type=str, default='wavfiles',
+    parser.add_argument('--src_root', type=str, default='Step 4 (final UNSEPERATED NORMAL FILES)',
                         help='directory of audio files in total duration')
-    parser.add_argument('--dst_root', type=str, default='clean',
+    parser.add_argument('--dst_root', type=str, default='Step 5 (last step NORMAL FILES)',
                         help='directory to put audio files split by delta_time')
     parser.add_argument('--delta_time', '-dt', type=float, default=6.0,
                         help='time in seconds to sample audio')
