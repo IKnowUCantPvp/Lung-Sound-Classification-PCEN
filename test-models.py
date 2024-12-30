@@ -169,6 +169,7 @@ def test_models(args):
         if features is None:
             continue
 
+        # Initialize results dictionary for this file
         file_results = {
             'file': wav_path,
             'true_class': true_label
@@ -205,17 +206,6 @@ def test_models(args):
     results_df = pd.DataFrame(results)
     results_df.to_csv(args.output_file, index=False)
 
-    # Print metrics
-    print("\nModel Performance Summary:")
-    for model_name in models.keys():
-        pred_col = f'{model_name}_pred'
-        valid_preds = results_df[results_df[pred_col].notna()]
-        if len(valid_preds) > 0:
-            accuracy = (valid_preds['true_class'] == valid_preds[pred_col]).mean()
-            print(f"{model_name}:")
-            print(f"- Accuracy: {accuracy:.3f}")
-            print(f"- Processed files: {len(valid_preds)}/{len(results_df)}")
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Test trained models on new dataset')
@@ -228,7 +218,7 @@ if __name__ == '__main__':
 
     # Set up directory structure like in Lung-Sounds.py
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    args.data_dir = os.path.join(current_dir, "newclean")
+    args.data_dir = os.path.join(current_dir, "clean")
 
     if not os.path.exists(args.data_dir):
         print(f"\nERROR: Data directory not found: {args.data_dir}")

@@ -1,12 +1,13 @@
 import tensorflow as tf
-import numpy as np
-from models import Conv2DPCEN
-from models import LibrosaPCENLayer
+import pandas as pd
+import matplotlib.pyplot as plt
+from models import ImprovedPCENLayer
 
-class PCENParameterMonitor(tf.keras.callbacks.Callback):
-    def __init__(self, log_file='pcen_parameters.csv'):
+
+class ImprovedPCENMonitor(tf.keras.callbacks.Callback):
+    def __init__(self, log_file='improved_pcen_parameters.csv'):
         """
-        Custom callback to monitor PCEN layer parameters during training
+        Custom callback to monitor ImprovedPCENLayer parameters during training
 
         Args:
             log_file (str): Path to save the CSV log of parameters
@@ -15,32 +16,38 @@ class PCENParameterMonitor(tf.keras.callbacks.Callback):
         self.log_file = log_file
         self.parameter_history = {
             'epoch': [],
-            'gain': [],
-            'bias': [],
-            'power': []
+            'alpha': [],
+            'delta': [],
+            'root': []
         }
 
     def on_epoch_end(self, epoch, logs=None):
         """
-        Collect PCEN layer parameters at the end of each epoch
+        Collect ImprovedPCENLayer parameters at the end of each epoch
 
         Args:
             epoch (int): Current training epoch
             logs (dict): Training metrics for the epoch
         """
-        # Find the PCEN layer
+        # Find the ImprovedPCENLayer
         pcen_layer = None
         for layer in self.model.layers:
-            if isinstance(layer, LibrosaPCENLayer):
+            if isinstance(layer, ImprovedPCENLayer):
                 pcen_layer = layer
                 break
 
         if pcen_layer is not None:
             # Log current parameter values
             self.parameter_history['epoch'].append(epoch)
-            self.parameter_history['gain'].append(float(pcen_layer.gain.numpy()))
-            self.parameter_history['bias'].append(float(pcen_layer.bias.numpy()))
-            self.parameter_history['power'].append(float(pcen_layer.power.numpy()))
+            self.parameter_history['alpha'].append(float(pcen_layer.alpha_var.numpy()))
+            self.parameter_history['delta'].append(float(pcen_layer.delta_var.numpy()))
+            self.parameter_history['root'].append(float(pcen_layer.root_var.numpy()))
+
+            # Print current values for monitoring during training
+            print(f"\nPCEN Parameters at epoch {epoch}:")
+            print(f"Alpha: {self.parameter_history['alpha'][-1]:.4f}")
+            print(f"Delta: {self.parameter_history['delta'][-1]:.4f}")
+            print(f"Root: {self.parameter_history['root'][-1]:.4f}")
 
     def on_train_end(self, logs=None):
         """
@@ -49,57 +56,48 @@ class PCENParameterMonitor(tf.keras.callbacks.Callback):
         Args:
             logs (dict): Training metrics
         """
-        import pandas as pd
-
         # Convert parameter history to DataFrame and save
         df = pd.DataFrame(self.parameter_history)
         df.to_csv(self.log_file, index=False)
-        print(f"PCEN parameter history saved to {self.log_file}")
+        print(f"\nPCEN parameter history saved to {self.log_file}")
 
-# Example usage in training
-def train_model():
-    # Assuming you have your model and training data ready
-    model = Conv2DPCEN()
+    def plot_parameters(self, save_path=None):
+        """
+        Visualize PCEN parameter changes during training
 
-    # Create the parameter monitor callback
-    pcen_monitor = PCENParameterMonitor(log_file='pcen_parameters.csv')
+        Args:
+            save_path (str, optional): Path to save the plot. If None, displays the plot
+        """
+        df = pd.DataFrame(self.parameter_history)
 
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 15), sharex=True)
 
-# Visualization option
-def plot_pcen_parameters(csv_file='pcen_parameters.csv'):
-    """
-    Visualize PCEN parameter changes during training
+        # Plot alpha parameter
+        ax1.plot(df['epoch'], df['alpha'], 'b-', label='Alpha')
+        ax1.set_title('PCEN Alpha Parameter (Smoothing)')
+        ax1.set_ylabel('Alpha Value')
+        ax1.grid(True)
+        ax1.legend()
 
-    Args:
-        csv_file (str): Path to the CSV file with parameter history
-    """
-    import matplotlib.pyplot as plt
-    import pandas as pd
+        # Plot delta parameter
+        ax2.plot(df['epoch'], df['delta'], 'r-', label='Delta')
+        ax2.set_title('PCEN Delta Parameter (Bias)')
+        ax2.set_ylabel('Delta Value')
+        ax2.grid(True)
+        ax2.legend()
 
-    # Read the CSV file
-    df = pd.read_csv(csv_file)
+        # Plot root parameter
+        ax3.plot(df['epoch'], df['root'], 'g-', label='Root')
+        ax3.set_title('PCEN Root Parameter')
+        ax3.set_xlabel('Epoch')
+        ax3.set_ylabel('Root Value')
+        ax3.grid(True)
+        ax3.legend()
 
-    # Create subplots for each parameter
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
+        plt.tight_layout()
 
-    # Plot gain
-    ax1.plot(df['epoch'], df['gain'], label='Gain')
-    ax1.set_title('PCEN Gain Parameter')
-    ax1.set_ylabel('Gain Value')
-    ax1.legend()
-
-    # Plot bias
-    ax2.plot(df['epoch'], df['bias'], label='Bias', color='orange')
-    ax2.set_title('PCEN Bias Parameter')
-    ax2.set_ylabel('Bias Value')
-    ax2.legend()
-
-    # Plot power
-    ax3.plot(df['epoch'], df['power'], label='Power', color='green')
-    ax3.set_title('PCEN Power Parameter')
-    ax3.set_xlabel('Epoch')
-    ax3.set_ylabel('Power Value')
-    ax3.legend()
-
-    plt.tight_layout()
-    plt.show()
+        if save_path:
+            plt.savefig(save_path)
+            print(f"Plot saved to {save_path}")
+        else:
+            plt.show()

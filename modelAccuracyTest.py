@@ -1,9 +1,7 @@
-#this doesn't work for some reason pls fix samer
-
 import tensorflow as tf
+from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.models import load_model
-from tensorflow.keras.utils import to_categorical, custom_object_scope
-from tensorflow.keras.layers import TimeDistributed, LayerNormalization
+from tensorflow.keras.losses import CategoricalCrossentropy
 import numpy as np
 from sklearn.metrics import (
     accuracy_score, precision_recall_fscore_support,
@@ -55,9 +53,25 @@ class DataGenerator(tf.keras.utils.Sequence):
         pass
 
 
+def load_pb_model(model_dir):
+    """Load a model saved in SavedModel (.pb) format"""
+    try:
+        model = tf.keras.models.load_model(model_dir)
+        return model
+    except Exception as e:
+        print(f"Error loading model from {model_dir}: {str(e)}")
+        return None
+
+
 def calculate_metrics(y_true, y_pred, y_pred_proba):
-    """Calculate classification metrics"""
+    """Calculate classification metrics including loss"""
     metrics = {}
+
+    # Initialize loss function
+    loss_fn = CategoricalCrossentropy(from_logits=False)
+
+    # Calculate categorical crossentropy loss
+    metrics['loss'] = float(loss_fn(y_true, y_pred_proba).numpy())
 
     # Convert one-hot encoded to class labels for some metrics
     y_true_classes = np.argmax(y_true, axis=1)
@@ -91,22 +105,20 @@ def calculate_metrics(y_true, y_pred, y_pred_proba):
         except ValueError:
             metrics['auc_per_class'].append(np.nan)
 
-    # Cross Entropy
-    metrics['cross_entropy'] = tf.keras.losses.categorical_crossentropy(
-        y_true, y_pred_proba
-    ).numpy().mean()
-
     return metrics
 
 
-def evaluate_model(model_path, data_dir, sr=8000, dt=6.0, batch_size=16):
+def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=16):
     """Evaluate a single model and return its metrics"""
-    model_name = os.path.basename(model_path).replace('.h5', '')
+    print(f"Processing model: {model_name} from directory: {model_dir}")
 
     if model_name == 'mfcc_cnn':
         try:
-            # Load MFCC model without custom objects
-            model = load_model(model_path, compile=False)
+            # Load MFCC model from SavedModel format
+            model = load_pb_model(model_dir)
+            if model is None:
+                return None
+
             print(f"MFCC Model input shape: {model.input_shape}")
 
             # Load pre-computed MFCC features and labels
@@ -144,18 +156,14 @@ def evaluate_model(model_path, data_dir, sr=8000, dt=6.0, batch_size=16):
             traceback.print_exc()
             return None
 
-    elif model_name == 'conv2dspec':
+    elif any(x in model_name.lower() for x in ['conv2doldpcen', 'conv2dspec']):
         try:
-            # Custom objects for kapre melspectrogram
-            from kapre.composed import get_melspectrogram_layer
-            custom_objects = {
-                'get_melspectrogram_layer': get_melspectrogram_layer
-            }
+            # Load model from SavedModel format
+            model = load_pb_model(model_dir)
+            if model is None:
+                return None
 
-            # Load model with custom objects
-            with custom_object_scope(custom_objects):
-                model = load_model(model_path, compile=False)
-                print(f"Spec Model input shape: {model.input_shape}")
+            print(f"Conv2D Model input shape: {model.input_shape}")
 
             # Prepare raw audio data
             wav_paths = glob(f'{data_dir}/**/*.wav', recursive=True)
@@ -179,9 +187,17 @@ def evaluate_model(model_path, data_dir, sr=8000, dt=6.0, batch_size=16):
             # Get predictions
             all_y_true = []
             all_y_pred = []
+            batch_losses = []
+            loss_fn = CategoricalCrossentropy(from_logits=False)
+
             for i in range(len(test_gen)):
                 x_batch, y_batch = test_gen[i]
                 pred_batch = model.predict(x_batch, verbose=0)
+
+                # Calculate batch loss
+                batch_loss = float(loss_fn(y_batch, pred_batch).numpy())
+                batch_losses.append(batch_loss)
+
                 all_y_true.append(y_batch)
                 all_y_pred.append(pred_batch)
 
@@ -189,8 +205,12 @@ def evaluate_model(model_path, data_dir, sr=8000, dt=6.0, batch_size=16):
             y_pred_proba = np.vstack(all_y_pred)
             y_pred = y_pred_proba.copy()
 
+            # Calculate average batch loss
+            avg_batch_loss = np.mean(batch_losses)
+            print(f"Average batch loss: {avg_batch_loss:.4f}")
+
         except Exception as e:
-            print(f"Error processing Spec model: {str(e)}")
+            print(f"Error processing Conv2D model: {str(e)}")
             import traceback
             traceback.print_exc()
             return None
@@ -200,6 +220,10 @@ def evaluate_model(model_path, data_dir, sr=8000, dt=6.0, batch_size=16):
 
     # Calculate metrics
     metrics = calculate_metrics(y_test, y_pred, y_pred_proba)
+
+    # Add average batch loss for Conv2D models
+    if 'batch_losses' in locals():
+        metrics['avg_batch_loss'] = avg_batch_loss
 
     # Generate ROC curves
     plt.figure(figsize=(10, 8))
@@ -227,10 +251,27 @@ def evaluate_model(model_path, data_dir, sr=8000, dt=6.0, batch_size=16):
     return metrics
 
 
+def find_model_dirs(base_dir):
+    """Find all model directories containing saved_model.pb files"""
+    model_dirs = []
+    for model_type in os.listdir(base_dir):
+        model_path = os.path.join(base_dir, model_type)
+        if os.path.isdir(model_path):
+            # Check if this directory contains saved_model.pb directly
+            if 'saved_model.pb' in os.listdir(model_path):
+                model_dirs.append((model_type, model_path))
+            else:
+                # Check subdirectories for saved_model.pb
+                for root, dirs, files in os.walk(model_path):
+                    if 'saved_model.pb' in files:
+                        model_dirs.append((model_type, root))
+    return model_dirs
+
+
 def main():
     parser = argparse.ArgumentParser(description='Evaluate audio classification models')
     parser.add_argument('--models_dir', type=str, default='models',
-                        help='directory containing .h5 model files')
+                        help='directory containing model directories')
     parser.add_argument('--data_dir', type=str, default='clean',
                         help='directory containing test audio files')
     parser.add_argument('--sample_rate', type=int, default=8000,
@@ -241,18 +282,21 @@ def main():
                         help='batch size for evaluation')
     args = parser.parse_args()
 
-    # Get all model files
-    model_files = glob(os.path.join(args.models_dir, '*.h5'))
+    # Find all model directories
+    model_pairs = find_model_dirs(args.models_dir)
 
-    if not model_files:
-        print(f"\nNo .h5 model files found in {args.models_dir}")
+    if not model_pairs:
+        print(f"\nNo SavedModel directories found in {args.models_dir}")
         print("Looking for models in:", os.path.abspath(args.models_dir))
-        print("\nAvailable files in models directory:")
+        print("\nAvailable directories:")
         try:
             if os.path.exists(args.models_dir):
-                files = os.listdir(args.models_dir)
-                for f in files:
-                    print(f"- {f}")
+                for item in os.listdir(args.models_dir):
+                    full_path = os.path.join(args.models_dir, item)
+                    if os.path.isdir(full_path):
+                        print(f"Directory: {item}")
+                        for subitem in os.listdir(full_path):
+                            print(f"  - {subitem}")
             else:
                 print(f"Directory {args.models_dir} does not exist!")
         except Exception as e:
@@ -261,24 +305,18 @@ def main():
 
     # Print found models
     print("\nFound models:")
-    for model_path in model_files:
-        print(f"- {os.path.basename(model_path)}")
+    for model_name, model_dir in model_pairs:
+        print(f"- {model_name}")
 
     # Evaluate each model
     results = []
-    for model_path in model_files:
-        model_name = os.path.basename(model_path).replace('.h5', '')
-
-        # Skip models that aren't conv2dspec or mfcc_cnn
-        if model_name not in ['conv2dspec', 'mfcc_cnn']:
-            print(f"\nSkipping {model_name} (not conv2dspec or mfcc_cnn)")
-            continue
-
+    for model_name, model_dir in model_pairs:
         print(f"\nEvaluating model: {model_name}")
 
         metrics = evaluate_model(
-            model_path,
+            model_dir,
             args.data_dir,
+            model_name,
             args.sample_rate,
             args.delta_time,
             args.batch_size
@@ -289,8 +327,11 @@ def main():
             results.append(metrics)
 
             print("\nMetrics:")
+            print(f"Loss: {metrics['loss']:.4f}")
+            if 'avg_batch_loss' in metrics:
+                print(f"Average batch loss: {metrics['avg_batch_loss']:.4f}")
             for metric, value in metrics.items():
-                if metric != 'model' and metric != 'auc_per_class':
+                if metric not in ['model', 'auc_per_class', 'loss', 'avg_batch_loss']:
                     print(f"{metric}: {value:.4f}")
             print("\nPer-class AUC scores:")
             classes = sorted(os.listdir(args.data_dir))
