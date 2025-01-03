@@ -49,7 +49,7 @@ def train(args):
     features_train, features_val, label_train, label_val = train_test_split(
         features,
         labels,
-        test_size=0.1,
+        test_size=0.2,
         random_state=0
     )
 
@@ -69,7 +69,7 @@ def train(args):
 
     # Set up callbacks
     cp = ModelCheckpoint(
-        f'models/{model_type}.h5',
+        f'models/{model_type}',  # Remove .h5 extension
         monitor='val_loss',
         save_best_only=True,
         save_weights_only=False,
@@ -102,7 +102,7 @@ if __name__ == '__main__':
                         help='directory containing processed MFCC features')
     parser.add_argument('--batch_size', type=int, default=16,
                         help='batch size')
-    parser.add_argument('--epochs', type=int, default=50,
+    parser.add_argument('--epochs', type=int, default=30,
                         help='number of epochs to train')
     args, _ = parser.parse_known_args()
 
