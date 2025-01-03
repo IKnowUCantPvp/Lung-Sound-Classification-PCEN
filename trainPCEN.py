@@ -101,7 +101,7 @@ def train(args):
     vg = DataGenerator(wav_val, label_val, sr, dt,
                            params['N_CLASSES'], batch_size=batch_size)
 
-    model = Conv2DOldPCEN(**params)
+    model = Conv2DPCEN(**params)
 
     cp = ModelCheckpoint(
         f'models/{model_type}',  # Remove .h5 extension
@@ -116,7 +116,7 @@ def train(args):
     pcen_monitor = ImprovedPCENMonitor(log_file=f'logs/{model_type}_pcen_params.csv')
 
     model.fit(tg, validation_data=vg,
-              epochs=70, verbose=1,
+              epochs=30, verbose=1,
               callbacks=[csv_logger, cp, pcen_monitor])
 
 if __name__ == '__main__':

@@ -8,6 +8,7 @@ class PCENLayer(layers.Layer):
                  smooth_coef=0.04,
                  delta=2.0,
                  root=0.5,
+                 floor=1e-6,  # Small numerical stability constant
                  trainable=True,
                  **kwargs):
         super(PCENLayer, self).__init__(**kwargs)
@@ -15,6 +16,7 @@ class PCENLayer(layers.Layer):
         self.smooth_coef = smooth_coef
         self.delta = delta
         self.root = root
+        self.floor = floor  # Store the floor constant
         self.trainable = trainable
 
     def build(self, input_shape):
@@ -49,7 +51,7 @@ class PCENLayer(layers.Layer):
 
     def call(self, inputs):
         # inputs shape: (batch, time, mel, channel)
-        eps = 1e-6
+        eps = self.floor  # Use floor as epsilon
 
         # Using tf.scan for the IIR filter
         def step(previous, current):
@@ -86,6 +88,7 @@ class PCENLayer(layers.Layer):
             'smooth_coef': float(self.smooth_coef_kernel.numpy()),
             'delta': float(self.delta_kernel.numpy()),
             'root': float(self.root_kernel.numpy()),
+            'floor': self.floor,  # Add floor to the configuration
             'trainable': self.trainable
         })
         return config

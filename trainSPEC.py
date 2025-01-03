@@ -108,7 +108,7 @@ def train(args):
     )
     csv_logger = CSVLogger(csv_path, append=False)
     model.fit(tg, validation_data=vg,
-              epochs=100, verbose=2,
+              epochs=30, verbose=2,
               callbacks=[csv_logger, cp])
 
 if __name__ == '__main__':
