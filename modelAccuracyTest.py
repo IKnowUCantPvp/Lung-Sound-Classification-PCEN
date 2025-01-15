@@ -14,38 +14,51 @@ from glob import glob
 import pandas as pd
 from scipy.io import wavfile
 from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
 import kapre
 from kapre.composed import get_melspectrogram_layer
 
 
 class DataGenerator(tf.keras.utils.Sequence):
-    """DataGenerator for Conv2DSpec model"""
+    def __init__(self, wav_paths, labels, sr=8000, dt=6.0, n_classes=11, batch_size=16):
+        # Filter out any paths with hidden directories
+        valid_indices = [i for i, path in enumerate(wav_paths)
+                         if not any(part.startswith('.') for part in path.split(os.sep))]
 
-    def __init__(self, wav_paths, labels, sr=8000, dt=6.0, n_classes=6, batch_size=16):
-        self.wav_paths = wav_paths
-        self.labels = labels
+        self.wav_paths = [wav_paths[i] for i in valid_indices]
+        self.labels = [labels[i] for i in valid_indices]
         self.sr = sr
         self.dt = dt
-        self.n_classes = n_classes
+        self.n_classes = n_classes  # Make sure this matches your actual number of classes
         self.batch_size = batch_size
         self.on_epoch_end()
+
+        print(f"DataGenerator initialized with {len(self.wav_paths)} valid files and {self.n_classes} classes")
 
     def __len__(self):
         return int(np.floor(len(self.wav_paths) / self.batch_size))
 
     def __getitem__(self, index):
-        indexes = np.arange(index * self.batch_size, (index + 1) * self.batch_size)
+        indexes = np.arange(index * self.batch_size, min((index + 1) * self.batch_size, len(self.wav_paths)))
         batch_paths = [self.wav_paths[i] for i in indexes]
         batch_labels = [self.labels[i] for i in indexes]
 
-        X = np.empty((self.batch_size, int(self.sr * self.dt), 1), dtype=np.float32)
-        Y = np.empty((self.batch_size, self.n_classes), dtype=np.float32)
+        X = np.empty((len(indexes), int(self.sr * self.dt), 1), dtype=np.float32)
+        Y = np.empty((len(indexes), self.n_classes), dtype=np.float32)
 
         for i, (path, label) in enumerate(zip(batch_paths, batch_labels)):
-            rate, wav = wavfile.read(path)
-            X[i,] = wav.reshape(-1, 1)
-            Y[i,] = to_categorical(label, num_classes=self.n_classes)
+            try:
+                rate, wav = wavfile.read(path)
+                if len(wav) > int(self.sr * self.dt):
+                    wav = wav[:int(self.sr * self.dt)]
+                elif len(wav) < int(self.sr * self.dt):
+                    wav = np.pad(wav, (0, int(self.sr * self.dt) - len(wav)))
+                X[i,] = wav.reshape(-1, 1)
+                Y[i,] = to_categorical(label, num_classes=self.n_classes)
+            except Exception as e:
+                print(f"Error processing file {path}: {str(e)}")
+                # Fill with zeros if there's an error
+                X[i,] = np.zeros((int(self.sr * self.dt), 1))
+                Y[i,] = np.zeros(self.n_classes)
 
         return X, Y
 
@@ -55,11 +68,19 @@ class DataGenerator(tf.keras.utils.Sequence):
 
 def load_pb_model(model_dir):
     """Load a model saved in SavedModel (.pb) format"""
+    print(f"\nAttempting to load model from: {model_dir}")
+    print(f"Directory contents: {os.listdir(model_dir)}")
+
     try:
+        print("Loading model...")
         model = tf.keras.models.load_model(model_dir)
+        print("Model loaded successfully")
         return model
     except Exception as e:
         print(f"Error loading model from {model_dir}: {str(e)}")
+        print("\nDetailed error information:")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -82,7 +103,8 @@ def calculate_metrics(y_true, y_pred, y_pred_proba):
 
     # Precision, Recall, F1 (weighted average)
     precision, recall, f1, _ = precision_recall_fscore_support(
-        y_true_classes, y_pred_classes, average='weighted'
+        y_true_classes, y_pred_classes, average='weighted',
+        zero_division=0
     )
     metrics['precision'] = precision
     metrics['recall'] = recall
@@ -91,16 +113,33 @@ def calculate_metrics(y_true, y_pred, y_pred_proba):
     # AUC calculations
     n_classes = y_true.shape[1]
 
-    # Overall AUC (one-vs-rest)
-    metrics['auc_ovr'] = roc_auc_score(y_true, y_pred_proba,
-                                       multi_class='ovr',
-                                       average='macro')
+    # Initialize AUC metrics
+    metrics['auc_ovr'] = np.nan
+    metrics['auc_per_class'] = []
+
+    # Count number of samples per class
+    class_samples = np.sum(y_true, axis=0)
+    valid_classes = class_samples > 1
+
+    # Only calculate AUC if we have at least two classes with more than one sample
+    if np.sum(valid_classes) >= 2:
+        try:
+            # Overall AUC (one-vs-rest)
+            metrics['auc_ovr'] = roc_auc_score(y_true, y_pred_proba,
+                                               multi_class='ovr',
+                                               average='macro')
+        except ValueError as e:
+            print(f"Warning: Could not calculate overall AUC: {str(e)}")
+            metrics['auc_ovr'] = np.nan
 
     # Per-class AUC scores
-    metrics['auc_per_class'] = []
     for i in range(n_classes):
         try:
-            class_auc = roc_auc_score(y_true[:, i], y_pred_proba[:, i])
+            # Only calculate AUC if we have more than one sample for this class
+            if class_samples[i] > 1:
+                class_auc = roc_auc_score(y_true[:, i], y_pred_proba[:, i])
+            else:
+                class_auc = np.nan
             metrics['auc_per_class'].append(class_auc)
         except ValueError:
             metrics['auc_per_class'].append(np.nan)
@@ -112,7 +151,7 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
     """Evaluate a single model and return its metrics"""
     print(f"Processing model: {model_name} from directory: {model_dir}")
 
-    if model_name == 'mfcc_cnn':
+    if 'mfcc_cnn' in model_name:
         try:
             # Load MFCC model from SavedModel format
             model = load_pb_model(model_dir)
@@ -133,21 +172,17 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
             print(f"Features shape after preprocessing: {features.shape}")
 
             # Prepare labels
-            classes = sorted(os.listdir(data_dir))
+            classes = sorted([d for d in os.listdir(data_dir)
+                              if not d.startswith('.') and os.path.isdir(os.path.join(data_dir, d))])
             le = LabelEncoder()
             le.fit(classes)
             labels = le.transform(label_array)
 
-            # Split data
-            features_train, features_test, label_train, label_test = train_test_split(
-                features, labels, test_size=0.2, random_state=42
-            )
-
             # Convert labels to categorical
-            y_test = to_categorical(label_test, num_classes=len(classes))
+            y_true = to_categorical(labels, num_classes=len(classes))
 
             # Get predictions
-            y_pred_proba = model.predict(features_test, batch_size=batch_size, verbose=1)
+            y_pred_proba = model.predict(features, batch_size=batch_size, verbose=1)
             y_pred = y_pred_proba.copy()
 
         except Exception as e:
@@ -156,8 +191,12 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
             traceback.print_exc()
             return None
 
-    elif any(x in model_name.lower() for x in ['conv2doldpcen', 'conv2dspec']):
+    elif any(x in model_name.lower() for x in ['conv2doldpcen', 'conv2dspec', 'conv2pcen']):
         try:
+            print(f"\nProcessing Conv2D/PCEN model: {model_name}")
+            print(f"Model directory path: {model_dir}")
+            print(f"Directory exists: {os.path.exists(model_dir)}")
+
             # Load model from SavedModel format
             model = load_pb_model(model_dir)
             if model is None:
@@ -167,20 +206,28 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
 
             # Prepare raw audio data
             wav_paths = glob(f'{data_dir}/**/*.wav', recursive=True)
-            classes = sorted(os.listdir(data_dir))
+            print(f"Found {len(wav_paths)} audio files")
+
+            # Filter out hidden directories and get valid classes
+            classes = sorted([d for d in os.listdir(data_dir)
+                              if not d.startswith('.') and os.path.isdir(os.path.join(data_dir, d))])
+            print(f"Found classes: {classes}")
+
             le = LabelEncoder()
             le.fit(classes)
-            labels = [os.path.split(x)[0].split('/')[-1] for x in wav_paths]
+            labels = [os.path.split(x)[0].split('/')[-1] for x in wav_paths
+                      if not os.path.split(x)[0].split('/')[-1].startswith('.')]
             labels = le.transform(labels)
 
-            # Split data
-            wav_train, wav_test, label_train, label_test = train_test_split(
-                wav_paths, labels, test_size=0.2, random_state=42
-            )
+            # Print class distribution
+            unique_labels, counts = np.unique(labels, return_counts=True)
+            for label, count in zip(unique_labels, counts):
+                print(f"Class {classes[label]}: {count} samples")
 
-            # Create data generator
-            test_gen = DataGenerator(
-                wav_test, label_test, sr, dt,
+            # Create data generator with smaller batch size for memory efficiency
+            batch_size = min(batch_size, 16)  # Reduce batch size if needed
+            data_gen = DataGenerator(
+                wav_paths, labels, sr, dt,
                 n_classes=len(classes), batch_size=batch_size
             )
 
@@ -190,18 +237,29 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
             batch_losses = []
             loss_fn = CategoricalCrossentropy(from_logits=False)
 
-            for i in range(len(test_gen)):
-                x_batch, y_batch = test_gen[i]
-                pred_batch = model.predict(x_batch, verbose=0)
+            total_batches = len(data_gen)
+            print(f"\nProcessing {total_batches} batches...")
 
-                # Calculate batch loss
-                batch_loss = float(loss_fn(y_batch, pred_batch).numpy())
-                batch_losses.append(batch_loss)
+            for i in range(total_batches):
+                if i % 10 == 0:  # Print progress every 10 batches
+                    print(f"Processing batch {i}/{total_batches}")
 
-                all_y_true.append(y_batch)
-                all_y_pred.append(pred_batch)
+                try:
+                    x_batch, y_batch = data_gen[i]
+                    pred_batch = model.predict(x_batch, verbose=0)
 
-            y_test = np.vstack(all_y_true)
+                    # Calculate batch loss
+                    batch_loss = float(loss_fn(y_batch, pred_batch).numpy())
+                    batch_losses.append(batch_loss)
+
+                    all_y_true.append(y_batch)
+                    all_y_pred.append(pred_batch)
+
+                except Exception as e:
+                    print(f"Error processing batch {i}: {str(e)}")
+                    continue
+
+            y_true = np.vstack(all_y_true)
             y_pred_proba = np.vstack(all_y_pred)
             y_pred = y_pred_proba.copy()
 
@@ -219,7 +277,7 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
         return None
 
     # Calculate metrics
-    metrics = calculate_metrics(y_test, y_pred, y_pred_proba)
+    metrics = calculate_metrics(y_true, y_pred, y_pred_proba)
 
     # Add average batch loss for Conv2D models
     if 'batch_losses' in locals():
@@ -230,9 +288,8 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
 
     # Plot ROC curve for each class
     n_classes = len(metrics['auc_per_class'])
-    classes = sorted(os.listdir(data_dir))
     for i in range(n_classes):
-        fpr, tpr, _ = roc_curve(y_test[:, i], y_pred_proba[:, i])
+        fpr, tpr, _ = roc_curve(y_true[:, i], y_pred_proba[:, i])
         plt.plot(fpr, tpr, label=f'Class {classes[i]} (AUC = {metrics["auc_per_class"][i]:.2f})')
 
     # Plot random classifier line
@@ -255,24 +312,39 @@ def find_model_dirs(base_dir):
     """Find all model directories containing saved_model.pb files"""
     model_dirs = []
     for model_type in os.listdir(base_dir):
+        if model_type.startswith('.'):  # Skip hidden files
+            continue
         model_path = os.path.join(base_dir, model_type)
         if os.path.isdir(model_path):
-            # Check if this directory contains saved_model.pb directly
             if 'saved_model.pb' in os.listdir(model_path):
                 model_dirs.append((model_type, model_path))
             else:
-                # Check subdirectories for saved_model.pb
-                for root, dirs, files in os.walk(model_path):
-                    if 'saved_model.pb' in files:
-                        model_dirs.append((model_type, root))
+                for item in os.listdir(model_path):
+                    if item.startswith('.'):  # Skip hidden files
+                        continue
+                    subpath = os.path.join(model_path, item)
+                    if os.path.isdir(subpath):
+                        if 'saved_model.pb' in os.listdir(subpath):
+                            model_dirs.append((model_type, model_path))
+                            break
+
+    # Debug output
+    print("\nFound model directories:")
+    for model_type, path in model_dirs:
+        print(f"{model_type}: {path}")
+        try:
+            print(f"Contents: {os.listdir(path)}")
+        except Exception as e:
+            print(f"Error listing contents: {str(e)}")
+
     return model_dirs
 
 
 def main():
     parser = argparse.ArgumentParser(description='Evaluate audio classification models')
-    parser.add_argument('--models_dir', type=str, default='models',
+    parser.add_argument('--models_dir', type=str, default='models_unaugmented_2datas',
                         help='directory containing model directories')
-    parser.add_argument('--data_dir', type=str, default='clean',
+    parser.add_argument('--data_dir', type=str, default='unaugmented8khz',
                         help='directory containing test audio files')
     parser.add_argument('--sample_rate', type=int, default=8000,
                         help='audio sample rate')
@@ -341,7 +413,7 @@ def main():
     # Save results to CSV
     if results:
         df = pd.DataFrame(results)
-        output_file = 'model_evaluation_results.csv'
+        output_file = 'model_evaluation_un.csv'
         df.to_csv(output_file, index=False)
         print(f"\nResults saved to {output_file}")
     else:

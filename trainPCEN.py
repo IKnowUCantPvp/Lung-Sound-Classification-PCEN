@@ -14,9 +14,7 @@ from glob import glob
 import argparse
 import warnings
 import librosa
-from monitorPCEN import ImprovedPCENMonitor
 from models import Conv2DOldPCEN
-from PCENLayer import PCENLearningRateScheduler
 
 class DataGenerator(tf.keras.utils.Sequence):
     def __init__(self, wav_paths, labels, sr, dt, n_classes,
@@ -63,6 +61,7 @@ class DataGenerator(tf.keras.utils.Sequence):
             np.random.shuffle(self.indexes)
 
 
+
 def train(args):
     src_root = args.src_root
     sr = args.sample_rate
@@ -97,20 +96,14 @@ def train(args):
 
     # Create data generators
     tg = DataGenerator(wav_train, label_train, sr, dt,
-                       params['N_CLASSES'], batch_size=batch_size)
+                           params['N_CLASSES'], batch_size=batch_size)
     vg = DataGenerator(wav_val, label_val, sr, dt,
-                       params['N_CLASSES'], batch_size=batch_size)
+                           params['N_CLASSES'], batch_size=batch_size)
 
-    # Create model with specified learning rate
-    model = Conv2DPCEN(**params)
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.01)
-    model.compile(optimizer=optimizer,
-                  loss='categorical_crossentropy',
-                  metrics=['accuracy'])
+    model = Conv2DOldPCEN(**params)
 
-    # Create all callbacks
     cp = ModelCheckpoint(
-        f'models/{model_type}',
+        f'models/{model_type}',  # Remove .h5 extension
         monitor='val_loss',
         save_best_only=True,
         save_weights_only=False,
@@ -119,39 +112,17 @@ def train(args):
         verbose=1
     )
     csv_logger = CSVLogger(csv_path, append=False)
-    pcen_monitor = ImprovedPCENMonitor(log_file=f'logs/{model_type}_pcen_params.csv')
 
-    # Create the learning rate scheduler for PCEN layer
-    base_lr = 0.001
-    max_lr = 0.1
-
-    def cyclic_lr(epoch):
-        # Cycle every 3 epochs
-        cycle = np.floor(1 + epoch / 3)
-        x = np.abs(epoch / 3 - cycle + 1)
-        lr = base_lr + (max_lr - base_lr) * x
-        return float(lr)
-
-    model = Conv2DPCEN(**params)
-    optimizer = tf.keras.optimizers.SGD(learning_rate=base_lr, momentum=0.9, nesterov=True)
-    model.compile(optimizer=optimizer,
-                  loss='categorical_crossentropy',
-                  metrics=['accuracy'])
-
-    # Add cyclic learning rate callback
-    lr_scheduler = tf.keras.callbacks.LearningRateScheduler(cyclic_lr)
-
-    # Train with cycling learning rate
     model.fit(tg, validation_data=vg,
-              epochs=25, verbose=1,
-              callbacks=[csv_logger, cp, pcen_monitor, lr_scheduler])
+              epochs=100, verbose=1,
+              callbacks=[csv_logger, cp])
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Audio Classification Training')
-    parser.add_argument('--model_type', type=str, default='conv2dpcen',
+    parser.add_argument('--model_type', type=str, default='conv2doldpcen',
                         help='model to run. i.e. conv1d, conv2d, lstm')
-
-    parser.add_argument('--src_root', type=str, default='neclean',
+    parser.add_argument('--src_root', type=str, default='clean',
                         help='directory of audio files in total duration')
     parser.add_argument('--batch_size', type=int, default=16,
                         help='batch size')
