@@ -205,7 +205,7 @@ if __name__ == "__main__":
     # Verify paths
     current_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(current_dir)
-    data_dir = os.path.join(parent_dir, "clean")
+    data_dir = os.path.join(parent_dir, "unaugmented8khz")
 
     if not os.path.exists(data_dir):
         print(f"\nERROR: Data directory not found: {data_dir}")

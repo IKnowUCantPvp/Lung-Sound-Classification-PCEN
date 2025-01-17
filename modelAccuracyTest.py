@@ -112,7 +112,7 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
     """Evaluate a single model and return its metrics"""
     print(f"Processing model: {model_name} from directory: {model_dir}")
 
-    if model_name == 'mfcc_cnn':
+    if model_name == 'mfcc_cnn (larger dataset)':
         try:
             # Load MFCC model from SavedModel format
             model = load_pb_model(model_dir)
@@ -156,7 +156,7 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
             traceback.print_exc()
             return None
 
-    elif any(x in model_name.lower() for x in ['conv2doldpcen', 'conv2dspec']):
+    elif any(x in model_name.lower() for x in ['conv2pcen (w and c) (larger dataset)', 'conv2dspec (larger dataset)']):
         try:
             # Load model from SavedModel format
             model = load_pb_model(model_dir)
