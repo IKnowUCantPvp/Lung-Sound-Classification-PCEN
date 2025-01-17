@@ -122,7 +122,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Audio Classification Training')
     parser.add_argument('--model_type', type=str, default='Conv2DOldPCEN',
                         help='model to run. i.e. conv1d, conv2d, lstm')
-    parser.add_argument('--src_root', type=str, default='clean (nonoise)',
+    parser.add_argument('--src_root', type=str, default=r'C:\Users\natha\OneDrive\Documents\GitHub\Lung-sounds-isef\CurrentDatasets\CleanDatasets (11 classes)\cleanTrainDataset (nonoise and COPD cut)',
                         help='directory of audio files in total duration')
     parser.add_argument('--batch_size', type=int, default=16,
                         help='batch size')
