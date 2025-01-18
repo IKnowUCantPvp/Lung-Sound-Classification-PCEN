@@ -110,7 +110,7 @@ def Conv2DOldPCEN(N_CLASSES=6, SR=8000, DT=6.0):
     #α=0.98, 𝛿=2.0, r=0.5, ε=1×10^-6, and T=0.03.
     #In my experience, T and r play a big role, followed by delta and alpha.
     # Start by changing T and r and see if it changes your downstream performance.
-    # (be sure to have r remain between 0 and 1).
+    #     # (be sure to have r remain between 0 and 1).
     # Epsilon has virtually no role and is only here to prevent division by zero
     # (which is already implausible due to the averaging going on in M)
 
