@@ -98,10 +98,10 @@ def Conv2DOldPCEN(N_CLASSES=6, SR=8000, DT=6.0):
 
     # Apply PCEN
     x = PCENLayer(
-        alpha=0.94,  # Higher initial smoothing for lung sounds
-        delta=2.5,  # Lower initial bias for subtle variations
-        root=0.47,  # Lower root for better noise handling
-        smooth_coef=0.017,  # Higher smoothing for temporal features (AKA T)
+        alpha=0.60,  # Higher initial smoothing for lung sounds
+        delta=6.5,  # Lower initial bias for subtle variations
+        root=0.85,  # Lower root for better noise handling
+        smooth_coef=0.0070,  # Higher smoothing for temporal features (AKA T)
         floor=1e-8,  # Small constant for numerical stability (ε/epsilon)
         trainable=False,
         name='pcen'
