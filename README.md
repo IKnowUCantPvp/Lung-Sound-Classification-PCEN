@@ -33,7 +33,7 @@ PCEN consistently outperformed traditional methods like Mel-Frequency Cepstral C
 ## Applications  
 - **Disease diagnosis**: Differentiates lung diseases such as COPD and pneumonia.  
 - **Abnormal/Normal classification**: Effective for screening respiratory conditions.  
-- **Wheezes/Crackles classification**: Identifies specific lung sounds crucial for diagnosis.
+- **Wheezes/Crackles/Healthy classification**: Identifies specific lung sounds crucial for diagnosis.
 
 ## Conclusion  
 PCEN proves to be a superior preprocessing method for automated lung sound diagnostics. Its adaptability, noise suppression, and robust performance make it a valuable tool for real-world medical applications.
