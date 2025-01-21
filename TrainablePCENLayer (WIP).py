@@ -20,4 +20,4 @@ pcen = sb_norm.PCEN(
 # The layer expects input of shape (batch, time, n_mels)
 # If your mel spectrogram is in log scale, you'll need to first convert it back to linear
 mel_spec = torch.exp(mel_log_spec)  # Convert from log to linear scale
-pcen_output = pcen(mel_spec)i dont
+#pcen_output = pcen(mel_spec)i dont
