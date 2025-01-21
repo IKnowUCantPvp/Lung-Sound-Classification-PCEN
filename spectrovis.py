@@ -4,8 +4,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
-
-
 def generate_spectrograms(audio_path, output_dir, sr=8000, n_mels=128,
                           hop_length=160, n_fft=512):
     """
@@ -70,15 +68,15 @@ def generate_spectrograms(audio_path, output_dir, sr=8000, n_mels=128,
     plt.savefig(os.path.join(output_dir, f'{filename}_melspec.png'))
     plt.close()
 
-    # 3. Generate PCEN spectrogram
+    # 3. Generate PCEN spectrogram with optimized parameters
     pcen = librosa.pcen(
         mel_spec,
         sr=sr,
-        gain=0.8,
-        bias=10,
-        power=0.25,
-        time_constant=0.4,
-        eps=1e-6
+        gain=0.8,  # Higher initial smoothing for lung sounds
+        bias=5.5,  # Lower initial bias for subtle variations
+        power=0.7,  # Lower root for better noise handling
+        time_constant=0.1,  # Higher smoothing for temporal features
+        eps=1e-8  # Small constant for numerical stability
     )
 
     plt.figure(figsize=(10, 4))
@@ -87,21 +85,20 @@ def generate_spectrograms(audio_path, output_dir, sr=8000, n_mels=128,
         sr=sr,
         hop_length=hop_length,
         x_axis='time',
-        y_axis='hz',
+        y_axis='mel',
         cmap='magma',
         norm=plt.Normalize(vmin=0, vmax=np.percentile(pcen, 95))
     )
-    # Modified colorbar formatting
-    plt.colorbar(img, format='%.2f')  # Show 2 decimal places without the '+' symbol
+    plt.colorbar(img, format='%.2f')
     plt.title(f'PCEN Spectrogram - {filename}')
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, f'{filename}_pcen.png'), dpi=300)
     plt.close()
 
-
+# /Users/samer/PycharmProjects/Lung-sounds-isef/clean_large/Bronchiectasis/111_1b2_Tc_sc_Meditron_original_2.wav
 if __name__ == "__main__":
     # Set your paths here
-    audio_file = "clean/Healthy/102_1b1_Ar_sc_Meditron_original_0.wav"  # Change this to your WAV file path
+    audio_file = "/Users/samer/PycharmProjects/Lung-sounds-isef/clean_large/COPD/104_1b1_Al_sc_Litt3200_original_2.wav"  # Change this to your WAV file path
     output_directory = "images"  # Where to save the spectrograms
 
     print(f"Processing file: {audio_file}")

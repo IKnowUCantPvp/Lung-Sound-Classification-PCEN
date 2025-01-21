@@ -218,7 +218,7 @@ if __name__ == '__main__':
 
     # Set up directory structure like in Lung-Sounds.py
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    args.data_dir = os.path.join(current_dir, "clean")
+    args.data_dir = os.path.join(current_dir, "neclean")
 
     if not os.path.exists(args.data_dir):
         print(f"\nERROR: Data directory not found: {args.data_dir}")
