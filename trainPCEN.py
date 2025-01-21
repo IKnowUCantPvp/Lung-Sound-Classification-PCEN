@@ -14,7 +14,9 @@ from glob import glob
 import argparse
 import warnings
 import librosa
+from monitorPCEN import ImprovedPCENMonitor
 from models import Conv2DOldPCEN
+
 
 class DataGenerator(tf.keras.utils.Sequence):
     def __init__(self, wav_paths, labels, sr, dt, n_classes,
@@ -61,7 +63,6 @@ class DataGenerator(tf.keras.utils.Sequence):
             np.random.shuffle(self.indexes)
 
 
-
 def train(args):
     src_root = args.src_root
     sr = args.sample_rate
@@ -100,7 +101,7 @@ def train(args):
     vg = DataGenerator(wav_val, label_val, sr, dt,
                            params['N_CLASSES'], batch_size=batch_size)
 
-    model = Conv2DOldPCEN(**params)
+    model = Conv2DPCEN(**params)
 
     cp = ModelCheckpoint(
         f'models/{model_type}',  # Remove .h5 extension
@@ -112,17 +113,17 @@ def train(args):
         verbose=1
     )
     csv_logger = CSVLogger(csv_path, append=False)
+    pcen_monitor = ImprovedPCENMonitor(log_file=f'logs/{model_type}_pcen_params.csv')
 
     model.fit(tg, validation_data=vg,
-              epochs=100, verbose=1,
-              callbacks=[csv_logger, cp])
-
+              epochs=30, verbose=1,
+              callbacks=[csv_logger, cp, pcen_monitor])
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Audio Classification Training')
-    parser.add_argument('--model_type', type=str, default='conv2doldpcen',
+    parser.add_argument('--model_type', type=str, default='conv2dpcen',
                         help='model to run. i.e. conv1d, conv2d, lstm')
-    parser.add_argument('--src_root', type=str, default='clean',
+    parser.add_argument('--src_root', type=str, default='wheezecrackle',
                         help='directory of audio files in total duration')
     parser.add_argument('--batch_size', type=int, default=16,
                         help='batch size')
