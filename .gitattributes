@@ -10,3 +10,5 @@ data-augmentation-stuff/** filter=lfs diff=lfs merge=lfs -text
 data[[:space:]]augmentation[[:space:]]stuff[[:space:]](use[[:space:]]for[[:space:]]additional[[:space:]]data[[:space:]]later)/** filter=lfs diff=lfs merge=lfs -text
 CurrentDatasets/*.wav filter=lfs diff=lfs merge=lfs -text
 CurrentDatasets/*.mp4 filter=lfs diff=lfs merge=lfs -text
+OldDataSets/*.wav filter=lfs diff=lfs merge=lfs -text
+OldDataSets/*.mp4 filter=lfs diff=lfs merge=lfs -text
