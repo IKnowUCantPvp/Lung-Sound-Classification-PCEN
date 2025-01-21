@@ -5,7 +5,7 @@ from tensorflow.keras import layers
 class PCENLayer(layers.Layer):
     def __init__(self,
                  alpha=0.98,
-                 smooth_coef=0.04,
+                 smooth_coef=0.03,
                  delta=2.0,
                  root=0.5,
                  floor=1e-6,  # Small numerical stability constant

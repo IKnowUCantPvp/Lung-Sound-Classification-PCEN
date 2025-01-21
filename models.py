@@ -98,14 +98,21 @@ def Conv2DOldPCEN(N_CLASSES=6, SR=8000, DT=6.0):
 
     # Apply PCEN
     x = PCENLayer(
-        alpha=0.98,  # Higher initial smoothing for lung sounds
-        delta=2.0,  # Lower initial bias for subtle variations
-        root=0.4,  # Lower root for better noise handling
-        smooth_coef=0.05,  # Higher smoothing for temporal features
-        floor=1e-7,  # Small constant for numerical stability
+        alpha=0.80,  # Higher initial smoothing for lung sounds
+        delta=5.5,  # Lower initial bias for subtle variations
+        root=0.85,  # Lower root for better noise handling
+        smooth_coef=0.0075,  # Higher smoothing for temporal features (AKA T)
+        floor=1e-8, # Small constant for numerical stability (ε/epsilon)
         trainable=False,
         name='pcen'
     )(i.output)
+
+    #α=0.98, 𝛿=2.0, r=0.5, ε=1×10^-6, and T=0.03.
+    #In my experience, T and r play a big role, followed by delta and alpha.
+    # Start by changing T and r and see if it changes your downstream performance.
+    #     # (be sure to have r remain between 0 and 1).
+    # Epsilon has virtually no role and is only here to prevent division by zero
+    # (which is already implausible due to the averaging going on in M)
 
     # Keep LayerNorm after PCEN
     x = LayerNormalization(axis=2, name='batch_norm')(x)

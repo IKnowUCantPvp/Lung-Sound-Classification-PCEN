@@ -68,7 +68,7 @@ def train(args):
               'SR':sr,
               'DT':dt}
     models = {
-              'conv2dspec':Conv2DSpec(**params),
+              'Conv2DSpec':Conv2DSpec(**params),
               }
     assert model_type in models.keys(), '{} not an available model'.format(model_type)
     csv_path = os.path.join('logs', '{}_history.csv'.format(model_type))
@@ -108,15 +108,15 @@ def train(args):
     )
     csv_logger = CSVLogger(csv_path, append=False)
     model.fit(tg, validation_data=vg,
-              epochs=30, verbose=2,
+              epochs=50, verbose=2,
               callbacks=[csv_logger, cp])
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Audio Classification Training')
-    parser.add_argument('--model_type', type=str, default='conv2dspec',
+    parser.add_argument('--model_type', type=str, default='Conv2DSpec',
                         help='model to run. i.e. conv1d, conv2d, lstm')
-    parser.add_argument('--src_root', type=str, default='clean',
+    parser.add_argument('--src_root', type=str, default=r'C:\Users\natha\OneDrive\Documents\GitHub\Lung-sounds-isef\CurrentDatasets\UnaugmentedDatasets (10 classes)\UnaugmentedTrainDataset',
                         help='directory of audio files in total duration')
     parser.add_argument('--batch_size', type=int, default=16    ,
                         help='batch size')
