@@ -16,10 +16,11 @@ from scipy.io import wavfile
 from sklearn.preprocessing import LabelEncoder
 import kapre
 from kapre.composed import get_melspectrogram_layer
-
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
 
 class DataGenerator(tf.keras.utils.Sequence):
-    def __init__(self, wav_paths, labels, sr=8000, dt=6.0, n_classes=11, batch_size=16):
+    def __init__(self, wav_paths, labels, sr=8000, dt=6.0, n_classes=10, batch_size=16):
         # Filter out any paths with hidden directories
         valid_indices = [i for i, path in enumerate(wav_paths)
                          if not any(part.startswith('.') for part in path.split(os.sep))]
@@ -65,7 +66,6 @@ class DataGenerator(tf.keras.utils.Sequence):
     def on_epoch_end(self):
         pass
 
-
 def load_pb_model(model_dir):
     """Load a model saved in SavedModel (.pb) format"""
     print(f"\nAttempting to load model from: {model_dir}")
@@ -83,16 +83,9 @@ def load_pb_model(model_dir):
         traceback.print_exc()
         return None
 
-
 def calculate_metrics(y_true, y_pred, y_pred_proba):
-    """Calculate classification metrics including loss"""
+    """Calculate classification metrics (excluding loss which is handled by model.evaluate)"""
     metrics = {}
-
-    # Initialize loss function
-    loss_fn = CategoricalCrossentropy(from_logits=False)
-
-    # Calculate categorical crossentropy loss
-    metrics['loss'] = float(loss_fn(y_true, y_pred_proba).numpy())
 
     # Convert one-hot encoded to class labels for some metrics
     y_true_classes = np.argmax(y_true, axis=1)
@@ -126,8 +119,8 @@ def calculate_metrics(y_true, y_pred, y_pred_proba):
         try:
             # Overall AUC (one-vs-rest)
             metrics['auc_ovr'] = roc_auc_score(y_true, y_pred_proba,
-                                               multi_class='ovr',
-                                               average='macro')
+                                             multi_class='ovr',
+                                             average='macro')
         except ValueError as e:
             print(f"Warning: Could not calculate overall AUC: {str(e)}")
             metrics['auc_ovr'] = np.nan
@@ -145,7 +138,6 @@ def calculate_metrics(y_true, y_pred, y_pred_proba):
             metrics['auc_per_class'].append(np.nan)
 
     return metrics
-
 
 def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=16):
     """Evaluate a single model and return its metrics"""
@@ -181,7 +173,11 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
             # Convert labels to categorical
             y_true = to_categorical(labels, num_classes=len(classes))
 
-            # Get predictions
+            # Use model.evaluate for loss
+            eval_results = model.evaluate(features, y_true, batch_size=batch_size, verbose=1)
+            loss = eval_results[0]  # First metric is always loss
+
+            # Get predictions for other metrics
             y_pred_proba = model.predict(features, batch_size=batch_size, verbose=1)
             y_pred = y_pred_proba.copy()
 
@@ -224,18 +220,20 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
             for label, count in zip(unique_labels, counts):
                 print(f"Class {classes[label]}: {count} samples")
 
-            # Create data generator with smaller batch size for memory efficiency
+            # Create data generator
             batch_size = min(batch_size, 16)  # Reduce batch size if needed
             data_gen = DataGenerator(
                 wav_paths, labels, sr, dt,
                 n_classes=len(classes), batch_size=batch_size
             )
 
-            # Get predictions
+            # Use model.evaluate for loss
+            eval_results = model.evaluate(data_gen, verbose=1)
+            loss = eval_results[0]  # First metric is always loss
+
+            # Get predictions for other metrics
             all_y_true = []
             all_y_pred = []
-            batch_losses = []
-            loss_fn = CategoricalCrossentropy(from_logits=False)
 
             total_batches = len(data_gen)
             print(f"\nProcessing {total_batches} batches...")
@@ -247,14 +245,8 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
                 try:
                     x_batch, y_batch = data_gen[i]
                     pred_batch = model.predict(x_batch, verbose=0)
-
-                    # Calculate batch loss
-                    batch_loss = float(loss_fn(y_batch, pred_batch).numpy())
-                    batch_losses.append(batch_loss)
-
                     all_y_true.append(y_batch)
                     all_y_pred.append(pred_batch)
-
                 except Exception as e:
                     print(f"Error processing batch {i}: {str(e)}")
                     continue
@@ -262,10 +254,6 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
             y_true = np.vstack(all_y_true)
             y_pred_proba = np.vstack(all_y_pred)
             y_pred = y_pred_proba.copy()
-
-            # Calculate average batch loss
-            avg_batch_loss = np.mean(batch_losses)
-            print(f"Average batch loss: {avg_batch_loss:.4f}")
 
         except Exception as e:
             print(f"Error processing Conv2D model: {str(e)}")
@@ -278,35 +266,56 @@ def evaluate_model(model_dir, data_dir, model_name, sr=8000, dt=6.0, batch_size=
 
     # Calculate metrics
     metrics = calculate_metrics(y_true, y_pred, y_pred_proba)
+    metrics['loss'] = loss  # Use the loss from model.evaluate
 
-    # Add average batch loss for Conv2D models
-    if 'batch_losses' in locals():
-        metrics['avg_batch_loss'] = avg_batch_loss
+    # Get class predictions for confusion matrix
+    y_true_classes = np.argmax(y_true, axis=1)
+    y_pred_classes = np.argmax(y_pred, axis=1)
+
+    # Plot confusion matrices
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+
+    # Calculate confusion matrix
+    cm = confusion_matrix(y_true_classes, y_pred_classes)
+    cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+
+    # Plot raw counts
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax1)
+    ax1.set_xlabel('Predicted')
+    ax1.set_ylabel('True')
+    ax1.set_title(f'Confusion Matrix (Counts) - {model_name}')
+    ax1.xaxis.set_ticklabels(classes, rotation=45)
+    ax1.yaxis.set_ticklabels(classes, rotation=45)
+
+    # Plot normalized percentages
+    sns.heatmap(cm_normalized, annot=True, fmt='.2%', cmap='Blues', ax=ax2)
+    ax2.set_xlabel('Predicted')
+    ax2.set_ylabel('True')
+    ax2.set_title(f'Confusion Matrix (Normalized) - {model_name}')
+    ax2.xaxis.set_ticklabels(classes, rotation=45)
+    ax2.yaxis.set_ticklabels(classes, rotation=45)
+
+    plt.tight_layout()
+    plt.savefig(f'confusion_matrix_{model_name}.png')
+    plt.close()
 
     # Generate ROC curves
     plt.figure(figsize=(10, 8))
-
-    # Plot ROC curve for each class
     n_classes = len(metrics['auc_per_class'])
     for i in range(n_classes):
         fpr, tpr, _ = roc_curve(y_true[:, i], y_pred_proba[:, i])
         plt.plot(fpr, tpr, label=f'Class {classes[i]} (AUC = {metrics["auc_per_class"][i]:.2f})')
 
-    # Plot random classifier line
     plt.plot([0, 1], [0, 1], 'k--', label='Random Classifier')
-
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
     plt.title(f'ROC Curves for {model_name}')
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.grid(True)
-
-    # Save the plot
     plt.savefig(f'roc_curves_{model_name}.png', bbox_inches='tight')
     plt.close()
 
     return metrics
-
 
 def find_model_dirs(base_dir):
     """Find all model directories containing saved_model.pb files"""
@@ -342,9 +351,9 @@ def find_model_dirs(base_dir):
 
 def main():
     parser = argparse.ArgumentParser(description='Evaluate audio classification models')
-    parser.add_argument('--models_dir', type=str, default='models_unaugmented_2datas',
+    parser.add_argument('--models_dir', type=str, default='inshallah_models_clean',
                         help='directory containing model directories')
-    parser.add_argument('--data_dir', type=str, default='unaugmented8khz',
+    parser.add_argument('--data_dir', type=str, default='/Users/samer/PycharmProjects/Lung-sounds-isef/CurrentDatasets/CleanDatasets (11 classes)/cleanEvaluationDataset (noise and COPD cut)',
                         help='directory containing test audio files')
     parser.add_argument('--sample_rate', type=int, default=8000,
                         help='audio sample rate')
@@ -352,6 +361,8 @@ def main():
                         help='time duration of audio samples')
     parser.add_argument('--batch_size', type=int, default=16,
                         help='batch size for evaluation')
+    parser.add_argument('--output_file', type=str, default='model_evaluation_huh.csv',
+                        help='filename for saving metrics results')
     args = parser.parse_args()
 
     # Find all model directories
@@ -413,9 +424,8 @@ def main():
     # Save results to CSV
     if results:
         df = pd.DataFrame(results)
-        output_file = 'model_evaluation_un.csv'
-        df.to_csv(output_file, index=False)
-        print(f"\nResults saved to {output_file}")
+        df.to_csv(args.output_file, index=False)
+        print(f"\nResults saved to {args.output_file}")
     else:
         print("\nNo models were successfully evaluated.")
 
