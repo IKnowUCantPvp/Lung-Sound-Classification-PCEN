@@ -1,137 +1,212 @@
-import tensorflow as tf
-from tensorflow.keras.callbacks import CSVLogger, ModelCheckpoint
-from tensorflow.keras.utils import to_categorical
-import os
-from scipy.io import wavfile
-import pandas as pd
+from torch.utils.data import Dataset
 import numpy as np
-from sklearn.utils.class_weight import compute_class_weight
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
-from models import Conv2DPCEN
-from tqdm import tqdm
+import torchaudio
+import torch
+from torch.utils.data import DataLoader
+import torch.optim as optim
+import torch.nn as nn
+from pyTorchModels import Conv2DPCEN
 from glob import glob
-import argparse
+import os
+from sklearn.preprocessing import LabelEncoder
 import warnings
-import librosa
-from monitorPCEN import ImprovedPCENMonitor
-from models import Conv2DOldPCEN
 
 
-class DataGenerator(tf.keras.utils.Sequence):
-    def __init__(self, wav_paths, labels, sr, dt, n_classes,
-                 batch_size=32, shuffle=True):
+class DataGenerator(Dataset):
+    def __init__(self, wav_paths, labels, sr, dt, n_classes):
         self.wav_paths = wav_paths
         self.labels = labels
         self.sr = sr
         self.dt = dt
         self.n_classes = n_classes
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-        self.input_length = int(self.sr * self.dt)  # Samples per audio clip
-        self.on_epoch_end()
 
     def __len__(self):
-        return int(np.floor(len(self.wav_paths) / self.batch_size))
+        return len(self.wav_paths)
 
-    def __getitem__(self, index):
-        indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]
-        wav_paths = [self.wav_paths[k] for k in indexes]
-        labels = [self.labels[k] for k in indexes]
+    def __getitem__(self, idx):
+        try:
+            # Load audio using torchaudio
+            waveform, sample_rate = torchaudio.load(self.wav_paths[idx])
 
-        # Batch arrays adapted for raw waveforms
-        X = np.zeros((self.batch_size, self.input_length, 1), dtype=np.float32)
-        Y = np.zeros((self.batch_size, self.n_classes), dtype=np.float32)
+            # Convert to mono if stereo
+            if waveform.size(0) > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
 
-        for i, (path, label) in enumerate(zip(wav_paths, labels)):
-            # Load and pad/truncate raw audio waveform
-            wav, _ = librosa.load(path, sr=self.sr)
-            if len(wav) < self.input_length:
-                wav = np.pad(wav, (0, self.input_length - len(wav)))
-            else:
-                wav = wav[:self.input_length]
+            # Resample if necessary
+            if sample_rate != self.sr:
+                resampler = torchaudio.transforms.Resample(sample_rate, self.sr)
+                waveform = resampler(waveform)
 
-            # Add channel dimension (as required by Kapre STFT)
-            X[i] = np.expand_dims(wav, axis=-1)  # Shape: (input_length, 1) for STFT
-            Y[i] = to_categorical(label, num_classes=self.n_classes)
+            # Remove channel dimension
+            waveform = waveform.squeeze(0)
 
-        return X, Y
+            # Create one-hot encoded label
+            label = torch.zeros(self.n_classes)
+            label[self.labels[idx]] = 1.0
 
-    def on_epoch_end(self):
-        self.indexes = np.arange(len(self.wav_paths))
-        if self.shuffle:
-            np.random.shuffle(self.indexes)
+            return waveform, label
+
+        except Exception as e:
+            print(f"Error loading file {self.wav_paths[idx]}: {str(e)}")
+            raise e
 
 
-def train(args):
-    src_root = args.src_root
-    sr = args.sample_rate
-    dt = args.delta_time
-    batch_size = args.batch_size
-    model_type = args.model_type
-    params = {'N_CLASSES': len(os.listdir(args.src_root)),
-              'SR': sr,
-              'DT': dt}
-
-    csv_path = os.path.join('logs', '{}_history.csv'.format(model_type))
-
+def get_dataloaders(src_root, sr=8000, dt=6.0, batch_size=32):
+    # Get all wav files recursively
     wav_paths = glob('{}/**'.format(src_root), recursive=True)
     wav_paths = [x.replace(os.sep, '/') for x in wav_paths if '.wav' in x]
-    classes = sorted(os.listdir(args.src_root))
+
+    # Extract labels from directory structure
+    classes = sorted(os.listdir(src_root))
+    n_classes = len(classes)
+
+    # Encode labels
     le = LabelEncoder()
     le.fit(classes)
     labels = [os.path.split(x)[0].split('/')[-1] for x in wav_paths]
     labels = le.transform(labels)
-    wav_train, wav_val, label_train, label_val = train_test_split(wav_paths,
-                                                                  labels,
-                                                                  test_size=0.2,
-                                                                  random_state=0)
 
-    assert len(label_train) >= args.batch_size, 'Number of train samples must be >= batch_size'
-    if len(set(label_train)) != params['N_CLASSES']:
-        warnings.warn('Found {}/{} classes in training data. Increase data size or change random_state.'.format(
-            len(set(label_train)), params['N_CLASSES']))
-    if len(set(label_val)) != params['N_CLASSES']:
-        warnings.warn('Found {}/{} classes in validation data. Increase data size or change random_state.'.format(
-            len(set(label_val)), params['N_CLASSES']))
-
-    # Create data generators
-    tg = DataGenerator(wav_train, label_train, sr, dt,
-                           params['N_CLASSES'], batch_size=batch_size)
-    vg = DataGenerator(wav_val, label_val, sr, dt,
-                           params['N_CLASSES'], batch_size=batch_size)
-
-    model = Conv2DPCEN(**params)
-
-    cp = ModelCheckpoint(
-        f'models/{model_type}',  # Remove .h5 extension
-        monitor='val_loss',
-        save_best_only=True,
-        save_weights_only=False,
-        mode='auto',
-        save_freq='epoch',
-        verbose=1
+    # Split data
+    from sklearn.model_selection import train_test_split
+    wav_train, wav_val, label_train, label_val = train_test_split(
+        wav_paths, labels, test_size=0.2, random_state=42
     )
-    csv_logger = CSVLogger(csv_path, append=False)
-    pcen_monitor = ImprovedPCENMonitor(log_file=f'logs/{model_type}_pcen_params.csv')
 
-    model.fit(tg, validation_data=vg,
-              epochs=30, verbose=1,
-              callbacks=[csv_logger, cp, pcen_monitor])
+    # Verify we have enough samples
+    assert len(label_train) >= batch_size, 'Number of train samples must be >= batch_size'
+
+    # Check if all classes are represented
+    if len(set(label_train)) != n_classes:
+        warnings.warn(
+            f'Found {len(set(label_train))}/{n_classes} classes in training data.')
+    if len(set(label_val)) != n_classes:
+        warnings.warn(
+            f'Found {len(set(label_val))}/{n_classes} classes in validation data.')
+
+    # Create datasets
+    train_dataset = DataGenerator(wav_train, label_train, sr, dt, n_classes)
+    val_dataset = DataGenerator(wav_val, label_val, sr, dt, n_classes)
+
+    # Create dataloaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True
+    )
+
+    return train_loader, val_loader, n_classes
+
+
+def train(model, device, train_loader, optimizer, criterion, epoch):
+    model.train()
+    total_loss = 0
+
+    for batch_idx, (data, target) in enumerate(train_loader):
+        data, target = data.to(device), target.to(device)
+        optimizer.zero_grad()
+        output = model(data)
+        loss = criterion(output, target)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+
+        if batch_idx % 10 == 0:
+            print(
+                f'Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)} '
+                f'({100. * batch_idx / len(train_loader):.0f}%)]\tLoss: {loss.item():.6f}'
+            )
+
+    # Return average loss for the epoch
+    return total_loss / len(train_loader)
+
+
+def validate(model, device, val_loader, criterion):
+    model.eval()
+    total_loss = 0
+
+    with torch.no_grad():
+        for data, target in val_loader:
+            data, target = data.to(device), target.to(device)
+            output = model(data)
+            loss = criterion(output, target)
+            total_loss += loss.item()
+
+    # Return average validation loss
+    return total_loss / len(val_loader)
+
+
+def main():
+    # Training settings
+    src_root = '/Users/samer/PycharmProjects/Lung-sounds-isef/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)'
+    batch_size = 16
+    delta_time = 6.0
+    sample_rate = 8000
+    num_epochs = 30
+    learning_rate = 0.001
+
+    # Get dataloaders
+    train_loader, val_loader, n_classes = get_dataloaders(
+        src_root,
+        sample_rate,
+        delta_time,
+        batch_size
+    )
+
+    # Device configuration
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
+    # Model
+    model = Conv2DPCEN(n_classes=n_classes).to(device)
+
+    # Loss and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+    # Save directory
+    save_dir = 'newPCENModel'
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Training loop
+    best_val_loss = float('inf')
+
+    for epoch in range(1, num_epochs + 1):
+        # Train
+        train_loss = train(model, device, train_loader, optimizer, criterion, epoch)
+
+        # Validate
+        val_loss = validate(model, device, val_loader, criterion)
+
+        print(f'Epoch: {epoch}')
+        print(f'Average train loss: {train_loss:.6f}')
+        print(f'Average validation loss: {val_loss:.6f}')
+
+        # Save if this is the best model so far (based on validation loss)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            model_save_path = os.path.join(save_dir, 'best_model.pt')
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+                'n_classes': n_classes,
+                'sample_rate': sample_rate,
+                'delta_time': delta_time
+            }, model_save_path)
+            print(f'New best model saved with validation loss: {val_loss:.6f}')
+
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Audio Classification Training')
-    parser.add_argument('--model_type', type=str, default='conv2dpcen',
-                        help='model to run. i.e. conv1d, conv2d, lstm')
-    parser.add_argument('--src_root', type=str, default='wheezecrackle',
-                        help='directory of audio files in total duration')
-    parser.add_argument('--batch_size', type=int, default=16,
-                        help='batch size')
-    parser.add_argument('--delta_time', '-dt', type=float, default=6.0,
-                        help='time in seconds to sample audio')
-    parser.add_argument('--sample_rate', '-sr', type=int, default=8000,
-                        help='sample rate of clean audio')
-    args, _ = parser.parse_known_args()
-
-    train(args)
-
+    main()
