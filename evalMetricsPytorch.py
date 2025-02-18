@@ -18,10 +18,22 @@ import torchaudio
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Description of your script.")
-    parser.add_argument('--data_dir', type=str, help='Directory containing data.')
-    parser.add_argument('--output_file', type=str, help='Output file for results.')
+    parser = argparse.ArgumentParser(description='Evaluate PyTorch audio classification models')
+    parser.add_argument('--models_dir', type=str, default='newPCENModel',
+                        help='directory containing .pt model files')
+    parser.add_argument('--data_dir', type=str,
+                        default=r'/Users/samer/PycharmProjects/Lung-sounds-isef/CurrentDatasets/CleanDatasets (10 classes)/cleanEvaluationDataset (noise and COPD cut)',
+                        help='directory containing test audio files')
+    parser.add_argument('--sample_rate', type=int, default=8000,
+                        help='audio sample rate')
+    parser.add_argument('--delta_time', type=float, default=6.0,
+                        help='time duration of audio samples')
+    parser.add_argument('--batch_size', type=int, default=16,
+                        help='batch size for evaluation')
+    parser.add_argument('--output_file', type=str, default='model_evaluation.csv',
+                        help='filename for saving metrics results')
     return parser.parse_args()
+
 
 def get_dataloaders(src_root, sr=8000, dt=6.0, batch_size=16):
     """Helper function to create data loaders"""
@@ -233,7 +245,7 @@ def evaluate_model(model_path, data_dir, model_name, device, sr=8000, dt=6.0, ba
         metrics = calculate_metrics(y_true, y_pred, y_pred_proba)
         metrics['loss'] = np.mean(all_losses)
 
-        # Generate plots only if evaluation was successful
+        # Generate plots
         try:
             # Generate confusion matrix plots
             y_true_classes = np.argmax(y_true, axis=1)
@@ -287,59 +299,6 @@ def evaluate_model(model_path, data_dir, model_name, device, sr=8000, dt=6.0, ba
         traceback.print_exc()
         return None
 
-    # Concatenate results
-    y_true = torch.cat(all_y_true, dim=0).numpy()
-    y_pred_proba = torch.cat(all_y_pred_proba, dim=0).numpy()
-    y_pred = y_pred_proba.copy()
-
-    # Calculate metrics
-    metrics = calculate_metrics(y_true, y_pred, y_pred_proba)
-    metrics['loss'] = np.mean(all_losses)
-
-    # Generate confusion matrix plots
-    y_true_classes = np.argmax(y_true, axis=1)
-    y_pred_classes = np.argmax(y_pred, axis=1)
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
-
-    cm = confusion_matrix(y_true_classes, y_pred_classes)
-    cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax1)
-    ax1.set_title(f'Confusion Matrix (Counts) - {model_name}')
-    ax1.set_xlabel('Predicted')
-    ax1.set_ylabel('True')
-    ax1.set_xticklabels(classes, rotation=45)
-    ax1.set_yticklabels(classes, rotation=45)
-
-    sns.heatmap(cm_normalized, annot=True, fmt='.2%', cmap='Blues', ax=ax2)
-    ax2.set_title(f'Confusion Matrix (Normalized) - {model_name}')
-    ax2.set_xlabel('Predicted')
-    ax2.set_ylabel('True')
-    ax2.set_xticklabels(classes, rotation=45)
-    ax2.set_yticklabels(classes, rotation=45)
-
-    plt.tight_layout()
-    plt.savefig(f'confusion_matrix_{model_name}.png')
-    plt.close()
-
-    # Generate ROC curves
-    plt.figure(figsize=(10, 8))
-    for i in range(len(classes)):
-        fpr, tpr, _ = roc_curve(y_true[:, i], y_pred_proba[:, i])
-        plt.plot(fpr, tpr, label=f'Class {classes[i]} (AUC = {metrics["auc_per_class"][i]:.2f})')
-
-    plt.plot([0, 1], [0, 1], 'k--', label='Random Classifier')
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title(f'ROC Curves for {model_name}')
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.grid(True)
-    plt.savefig(f'roc_curves_{model_name}.png', bbox_inches='tight')
-    plt.close()
-
-    return metrics
-
 
 def find_model_files(base_dir):
     """Find all .pt model files"""
@@ -352,23 +311,8 @@ def find_model_files(base_dir):
     return model_files
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Evaluate PyTorch audio classification models')
-    parser.add_argument('--models_dir', type=str, default='newPCENModel',
-                        help='directory containing .pt model files')
-    parser.add_argument('--data_dir', type=str,
-                        default=r'/Users/samer/PycharmProjects/Lung-sounds-isef/CurrentDatasets/CleanDatasets (10 classes)/cleanEvaluationDataset (noise and COPD cut)',
-                        help='directory containing test audio files')
-    parser.add_argument('--sample_rate', type=int, default=8000,
-                        help='audio sample rate')
-    parser.add_argument('--delta_time', type=float, default=6.0,
-                        help='time duration of audio samples')
-    parser.add_argument('--batch_size', type=int, default=16,
-                        help='batch size for evaluation')
-    parser.add_argument('--output_file', type=str, default='model_evaluation.csv',
-                        help='filename for saving metrics results')
-    args = parser.parse_args()
-
+if __name__ == "__main__":
+    args = parse_args()
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -378,7 +322,7 @@ def main():
 
     if not model_pairs:
         print(f"\nNo .pt model files found in {args.models_dir}")
-        return
+        exit()
 
     print("\nFound models:")
     for model_name, model_path in model_pairs:
@@ -410,7 +354,7 @@ def main():
                     print(f"{metric}: {value:.4f}")
             print("\nPer-class AUC scores:")
             classes = sorted([d for d in os.listdir(args.data_dir)
-                              if not d.startswith('.') and os.path.isdir(os.path.join(data_dir, d))])
+                              if not d.startswith('.') and os.path.isdir(os.path.join(args.data_dir, d))])
             for cls, auc in zip(classes, metrics['auc_per_class']):
                 print(f"{cls}: {auc:.4f}")
 
