@@ -47,4 +47,4 @@ This is a comparison between PCEN and mel-log-spectrogram:
 - Exploring applications in other medical domains like heart or vocal sound analysis.  
 - Integrating PCEN with wearable devices for real-time health monitoring.
 
-For the full paper, [click here](./Ma_Nathan_Paper.pdf).
+For the full paper, [click here](./LungSoundsPaper.pdf).
