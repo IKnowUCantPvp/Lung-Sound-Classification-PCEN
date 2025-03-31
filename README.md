@@ -48,3 +48,4 @@ This is a comparison between PCEN and mel-log-spectrogram:
 - Integrating PCEN with wearable devices for real-time health monitoring.
 
 For the full paper, [click here](./LungSoundsPaper.pdf).
+For the Streamlit app, [click here](https://lung-classification-model.streamlit.app/)
