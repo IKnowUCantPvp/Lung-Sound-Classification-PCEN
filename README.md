@@ -9,21 +9,21 @@ PCEN consistently outperformed traditional methods like Mel-Frequency Cepstral C
 1. **MFCC**: A common method for extracting audio features but sensitive to noise, which limits its effectiveness in medical settings.  
    This is an MFCC image used in the study:
 
-   ![MFCC Sound Image](images/MFCC_Coefficients.png)
+   ![MFCC Sound Image](docs/images/MFCC_Coefficients.png)
 
 2. **Spectrograms**: Offer high accuracy but are also affected by ambient noise.  
    This is a lung sound spectrogram used in the study:
 
-   ![Lung Sound Spectrogram](images/Mel_Spectrogram.png)
+   ![Lung Sound Spectrogram](docs/images/Mel_Spectrogram.png)
 
 3. **PCEN**: Suppresses background noise and amplifies important lung sound patterns, making it ideal for this application.  
    This is the equation for PCEN:
 
-   ![PCEN Equation](images/PCEN_Equation.png)
+   ![PCEN Equation](docs/images/PCEN_Equation.png)
 
    This is a PCEN spectrogram used in the study:
 
-   ![PCEN Sound Spectrogram](images/PCEN_Spectrogram.png)
+   ![PCEN Sound Spectrogram](docs/images/PCEN_Spectrogram.png)
 
 ## Key Findings  
 - PCEN outperforms MFCC and spectrograms across all datasets.  
@@ -40,7 +40,8 @@ PCEN proves to be a superior preprocessing method for automated lung sound diagn
 
 This is a comparison between PCEN and mel-log-spectrogram:
 
-![PCEN Sound Spectrogram](images/Spec_PCEN_Comparison.png)
+![PCEN Sound Spectrogram](docs/images/Spec_PCEN_Comparison.png)
+
 
 ## Future Work  
 - Implementing automated parameter tuning for PCEN.  
