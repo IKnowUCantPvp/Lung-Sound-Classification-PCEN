@@ -6,6 +6,7 @@ import kapre
 from kapre.composed import get_melspectrogram_layer
 import tensorflow as tf
 import os
+from PCENLayer import PCENLayer
 
 
 def Conv1D(N_CLASSES=10, SR=16000, DT=1.0):
@@ -80,6 +81,67 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.regularizers import l2
 
 
+def Conv2DOldPCEN(N_CLASSES=6, SR=8000, DT=6.0):
+    input_shape = (int(SR * DT), 1)
+
+    # Get the base mel spectrogram layer without decibel conversion
+    i = get_melspectrogram_layer(input_shape=input_shape,
+                                 n_mels=128,
+                                 pad_end=True,
+                                 n_fft=512,
+                                 win_length=400,
+                                 hop_length=160,
+                                 sample_rate=SR,
+                                 return_decibel=False,  # No dB conversion before PCEN
+                                 input_data_format='channels_last',
+                                 output_data_format='channels_last')
+
+    # Apply PCEN
+    x = PCENLayer(
+        alpha=0.80,  # Higher initial smoothing for lung sounds
+        delta=5.5,  # Lower initial bias for subtle variations
+        root=0.85,  # Lower root for better noise handling
+        smooth_coef=0.0075,  # Higher smoothing for temporal features (AKA T)
+        floor=1e-8, # Small constant for numerical stability (ε/epsilon)
+        trainable=False,
+        name='pcen'
+    )(i.output)
+
+    #α=0.98, 𝛿=2.0, r=0.5, ε=1×10^-6, and T=0.03.
+    #In my experience, T and r play a big role, followed by delta and alpha.
+    # Start by changing T and r and see if it changes your downstream performance.
+    #     # (be sure to have r remain between 0 and 1).
+    # Epsilon has virtually no role and is only here to prevent division by zero
+    # (which is already implausible due to the averaging going on in M)
+
+    # Keep LayerNorm after PCEN
+    x = LayerNormalization(axis=2, name='batch_norm')(x)
+
+    # Rest of the model remains exactly the same
+    x = layers.Conv2D(8, kernel_size=(7, 7), activation='tanh', padding='same', name='conv2d_tanh')(x)
+    x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_1')(x)
+    x = layers.Conv2D(16, kernel_size=(5, 5), activation='relu', padding='same', name='conv2d_relu_1')(x)
+    x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_2')(x)
+    x = layers.Conv2D(16, kernel_size=(3, 3), activation='relu', padding='same', name='conv2d_relu_2')(x)
+    x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_3')(x)
+    x = layers.Conv2D(32, kernel_size=(3, 3), activation='relu', padding='same', name='conv2d_relu_3')(x)
+    x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_4')(x)
+    x = layers.Conv2D(32, kernel_size=(3, 3), activation='relu', padding='same', name='conv2d_relu_4')(x)
+    x = layers.Flatten(name='flatten')(x)
+    x = layers.Dropout(rate=0.2, name='dropout')(x)
+    x = layers.Dense(64, activation='relu', activity_regularizer=l2(0.001), name='dense')(x)
+    o = layers.Dense(N_CLASSES, activation='softmax', name='softmax')(x)
+
+    model = Model(inputs=i.input, outputs=o, name='2d_convolution_pcen')
+    model.compile(optimizer='adam',
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+    return model
+
+
+
+
+
 def Conv2DMFCC(input_shape, n_classes=6):
     """
     Create CNN model for MFCC features with exactly the same architecture as Conv2DSpec
@@ -115,20 +177,32 @@ def Conv2DMFCC(input_shape, n_classes=6):
     return model
 
 
+import tensorflow as tf
+from tensorflow.keras import layers, Model
+from tensorflow.keras.regularizers import l2
+import librosa
+import numpy as np
+
+
 def Conv2DPCEN(N_CLASSES=6, SR=8000, DT=6.0):
     """
-    Modified Conv2DPCEN model with fixed normalization axis and proper input handling
+    Modified Conv2DPCEN model to match the Conv2DSpec input format
+    Using get_melspectrogram_layer like Conv2DSpec
     """
-    # Calculate exact input shape
-    n_mels = 128
-    hop_length = 160
-    time_dims = 1 + (int(SR * DT) // hop_length)
-    input_shape = (n_mels, time_dims, 1)
+    input_shape = (int(SR * DT), 1)
+    i = get_melspectrogram_layer(input_shape=input_shape,
+                                 n_mels=128,
+                                 pad_end=True,
+                                 n_fft=512,
+                                 win_length=400,
+                                 hop_length=160,
+                                 sample_rate=SR,
+                                 return_decibel=True,
+                                 input_data_format='channels_last',
+                                 output_data_format='channels_last')
 
-    inputs = layers.Input(shape=input_shape)
-
-    # Change normalization axis to -1 (channel axis)
-    x = LayerNormalization(axis=-1, name='batch_norm')(inputs)
+    x = ImprovedPCENLayer()(i.output)
+    x = LayerNormalization(axis=-1, name='batch_norm')(x)
     x = layers.Conv2D(8, kernel_size=(7, 7), activation='tanh', padding='same', name='conv2d_tanh')(x)
     x = layers.MaxPooling2D(pool_size=(2, 2), padding='same', name='max_pool_2d_1')(x)
     x = layers.Conv2D(16, kernel_size=(5, 5), activation='relu', padding='same', name='conv2d_relu_1')(x)
@@ -143,13 +217,99 @@ def Conv2DPCEN(N_CLASSES=6, SR=8000, DT=6.0):
     x = layers.Dense(64, activation='relu', activity_regularizer=l2(0.001), name='dense')(x)
     outputs = layers.Dense(N_CLASSES, activation='softmax', name='softmax')(x)
 
-    model = Model(inputs=inputs, outputs=outputs, name='2d_convolution_pcen')
+    model = Model(inputs=i.input, outputs=outputs, name='2d_convolution_pcen')
     model.compile(optimizer='adam',
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
 
     return model
 
+
+class ImprovedPCENLayer(tf.keras.layers.Layer):
+    def __init__(self,
+                 alpha=0.95,  # Higher initial smoothing for lung sounds
+                 delta=1.5,  # Lower initial bias for subtle variations
+                 root=0.3,  # Lower root for better noise handling
+                 smooth_coef=0.04,  # Higher smoothing for temporal features
+                 floor=1e-6,  # Small constant for numerical stability
+                 trainable=True,
+                 **kwargs):
+        super(ImprovedPCENLayer, self).__init__(**kwargs)
+        self.alpha = alpha
+        self.delta = delta
+        self.root = root
+        self.smooth_coef = smooth_coef
+        self.floor = floor
+        self.trainable = trainable
+
+    def build(self, input_shape):
+        # Initialize trainable parameters with lung-sound-specific constraints
+        self.alpha_var = self.add_weight(
+            name='alpha',
+            shape=(1,),
+            initializer=tf.keras.initializers.Constant(self.alpha),
+            # Higher range for alpha to capture longer temporal dependencies
+            constraint=tf.keras.constraints.MinMaxNorm(min_value=0.9, max_value=0.99),
+            trainable=self.trainable
+        )
+
+        self.delta_var = self.add_weight(
+            name='delta',
+            shape=(1,),
+            initializer=tf.keras.initializers.Constant(self.delta),
+            # Wider range for delta to handle varying breath intensities
+            constraint=tf.keras.constraints.MinMaxNorm(min_value=0.8, max_value=3.0),
+            trainable=self.trainable
+        )
+
+        self.root_var = self.add_weight(
+            name='root',
+            shape=(1,),
+            initializer=tf.keras.initializers.Constant(self.root),
+            # Lower range for root to preserve subtle features
+            constraint=tf.keras.constraints.MinMaxNorm(min_value=0.2, max_value=0.7),
+            trainable=self.trainable
+        )
+
+    def call(self, inputs):
+        # Ensure non-negative input
+        inputs = tf.maximum(inputs, self.floor)
+
+        # Enhanced temporal integration for lung sounds
+        frames = tf.shape(inputs)[1]
+        # Longer decay kernel for respiratory cycles
+        decay_kernel = tf.pow(self.alpha_var, tf.range(frames, dtype=tf.float32))
+        decay_kernel = decay_kernel / tf.reduce_sum(decay_kernel)
+        decay_kernel = tf.reshape(decay_kernel, [1, -1, 1, 1])
+
+        # Apply smoothing using conv2d
+        smoothed = tf.nn.conv2d(
+            inputs,
+            decay_kernel,
+            strides=[1, 1, 1, 1],
+            padding='SAME'
+        )
+
+        smoothed = tf.maximum(smoothed, self.floor)
+
+        # PCEN computation with adjusted parameters for lung sounds
+        smooth_factor = tf.pow(smoothed, -self.alpha_var)
+        inner_term = inputs * smooth_factor + self.delta_var
+        pcen = tf.pow(inner_term, self.root_var) - tf.pow(self.delta_var, self.root_var)
+
+        return pcen
+
+    def get_config(self):
+        config = super(ImprovedPCENLayer, self).get_config()
+        config.update({
+            'alpha': float(self.alpha),
+            'delta': float(self.delta),
+            'root': float(self.root),
+            'smooth_coef': float(self.smooth_coef),
+            'floor': float(self.floor),
+            'trainable': self.trainable
+        })
+        return config
 
 def LSTM(N_CLASSES=10, SR=16000, DT=1.0):
     input_shape = (int(SR*DT), 1)
@@ -186,4 +346,3 @@ def LSTM(N_CLASSES=10, SR=16000, DT=1.0):
                   metrics=['accuracy'])
 
     return model
-

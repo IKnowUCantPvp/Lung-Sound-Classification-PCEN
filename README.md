@@ -1,88 +1,51 @@
-# Audio-Classification (Kapre Version)
+# Audio Preprocessing Techniques for Classifying Lung Sounds
 
-Pipeline for prototyping audio classification algorithms with TF 2.3
+## Overview  
+This study investigates audio preprocessing methods for classifying lung sounds, focusing on **Per-Channel Energy Normalization (PCEN)**. Using two datasets, the study covers three classification tasks: disease diagnosis, distinguishing between normal and abnormal lung sounds, and identifying specific respiratory sounds (wheezes, crackles).
 
-![melspectrogram](docs/mel_spectrograms.png)
+PCEN consistently outperformed traditional methods like Mel-Frequency Cepstral Coefficients (MFCC) and log-mel spectrograms, showing improved accuracy and robustness against noise.
 
-<!-- TOC -->
+## Preprocessing Methods Compared  
+1. **MFCC**: A common method for extracting audio features but sensitive to noise, which limits its effectiveness in medical settings.  
+   This is an MFCC image used in the study:
 
-- [YouTube](#youtube)
-- [Environment](#environment)
-- [Jupyter Notebooks](#jupyter-notebooks)
-- [Audio Preprocessing](#audio-preprocessing)
-- [Training](#training)
-- [Plot History](#plot-history)
-- [Confusion Matrix](#confusion-matrix)
-- [Receiver Operating Characteristic](#receiver-operating-characteristic)
-- [Kapre](#kapre)
+   ![MFCC Sound Image](images/MFCC_Coefficients.png)
 
-<!-- /TOC -->
+2. **Spectrograms**: Offer high accuracy but are also affected by ambient noise.  
+   This is a lung sound spectrogram used in the study:
 
-### YouTube
+   ![Lung Sound Spectrogram](images/Mel_Spectrogram.png)
 
-This series has been re-worked. There are new videos to support this repository. It is recommended to follow the new series.
+3. **PCEN**: Suppresses background noise and amplifies important lung sound patterns, making it ideal for this application.  
+   This is the equation for PCEN:
 
-https://www.youtube.com/playlist?list=PLhA3b2k8R3t0SYW_MhWkWS5fWg-BlYqWn
+   ![PCEN Equation](images/PCEN_Equation.png)
 
-If you want to follow the old videos, restore to a previous commit.
+   This is a PCEN spectrogram used in the study:
 
-`git checkout 404f2a6f989cec3421e8217d71ef070f3593a84d`
+   ![PCEN Sound Spectrogram](images/PCEN_Spectrogram.png)
 
-### Environment
+## Key Findings  
+- PCEN outperforms MFCC and spectrograms across all datasets.  
+- Critical parameters for PCEN performance include **smoothing coefficient (T)** and **root (r)** for dynamic range compression.  
+- Data augmentation significantly improves classification accuracy, especially for PCEN.
 
-```
-conda create -n audio python=3.7
-activate audio
-pip install -r requirements.txt
-```
+## Applications  
+- **Disease diagnosis**: Differentiates lung diseases such as COPD and pneumonia.  
+- **Abnormal/Normal classification**: Effective for screening respiratory conditions.  
+- **Wheezes/Crackles/Healthy classification**: Identifies specific lung sounds crucial for diagnosis.
 
-### Jupyter Notebooks
+## Conclusion  
+PCEN proves to be a superior preprocessing method for automated lung sound diagnostics. Its adaptability, noise suppression, and robust performance make it a valuable tool for real-world medical applications.
 
-Assuming you have ipykernel installed from your conda environment
+This is a comparison between PCEN and mel-log-spectrogram:
 
-`ipython kernel install --user --name=audio`
+![PCEN Sound Spectrogram](images/Spec_PCEN_Comparison.png)
 
-`conda activate audio`
+## Future Work  
+- Implementing automated parameter tuning for PCEN.  
+- Exploring applications in other medical domains like heart or vocal sound analysis.  
+- Integrating PCEN with wearable devices for real-time health monitoring.
 
-`jupyter-notebook`
 
-### Audio Preprocessing
-
-clean.py can be used to preview the signal envelope at a threshold to remove low magnitude data
-
-When you uncomment split_wavs, a clean directory will be created with downsampled mono audio split by delta time
-
-`python clean.py`
-
-![signal envelope](docs/signal_envelope.png)
-
-### Training
-
-Change model_type to: conv1d, conv2d, lstm
-
-Sample rate and delta time should be the same from clean.py
-
-`python train.py`
-
-### Plot History
-
-Assuming you have ran all 3 models and saved the images into logs, check `notebooks/Plot History.ipynb`
-
-![history](docs/model_history.png)
-
-`notebooks/Confusion Matrix and ROC.ipynb`
-
-### Confusion Matrix
-
-![conf_mat](docs/conf_mat.png)
-
-### Receiver Operating Characteristic
-
-![roc](docs/roc.png)
-
-### Kapre
-
-For computation of audio transforms from time to frequency domain on the fly
-
-https://github.com/keunwoochoi/kapre  
-https://arxiv.org/pdf/1706.05781.pdf
+For the Streamlit app, [click here](https://lung-classification-model.streamlit.app/).

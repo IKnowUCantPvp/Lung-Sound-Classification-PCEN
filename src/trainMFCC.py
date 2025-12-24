@@ -49,7 +49,7 @@ def train(args):
     features_train, features_val, label_train, label_val = train_test_split(
         features,
         labels,
-        test_size=0.1,
+        test_size=0.2,
         random_state=0
     )
 
@@ -69,7 +69,7 @@ def train(args):
 
     # Set up callbacks
     cp = ModelCheckpoint(
-        f'models/{model_type}.h5',
+        f'models/{model_type}',  # Remove .h5 extension
         monitor='val_loss',
         save_best_only=True,
         save_weights_only=False,
@@ -95,14 +95,14 @@ def train(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='MFCC Classification Training')
     parser.add_argument('--model_type', type=str, default='mfcc_cnn',
-                        help='model to run: mfcc_cnn')
-    parser.add_argument('--src_root', type=str, default='clean',
+                        help='model to run: mfcc_cnn (larger dataset)')
+    parser.add_argument('--src_root', type=str, default= r'C:\Users\natha\OneDrive\Documents\GitHub\Lung-sounds-isef\CurrentDatasets\UnaugmentedDatasets (10 classes)\UnaugmentedTrainDataset',
                         help='directory of original audio files')
     parser.add_argument('--processed_dir', type=str, default='2D-MFCC',
                         help='directory containing processed MFCC features')
     parser.add_argument('--batch_size', type=int, default=16,
                         help='batch size')
-    parser.add_argument('--epochs', type=int, default=1,
+    parser.add_argument('--epochs', type=int, default=50,
                         help='number of epochs to train')
     args, _ = parser.parse_known_args()
 
