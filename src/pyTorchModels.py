@@ -114,3 +114,113 @@ class Conv2DPCEN(nn.Module):
         x = self.dense(x)
         x = self.output(x)
         return x
+
+
+from .TVaryingPCEN import TVaryingPCEN
+
+class Conv2DPCEN_TVarying(nn.Module):
+    def __init__(self, n_classes=10, sr=8000, dt=6.0, n_t_constants=8, trainable=True):
+        super(Conv2DPCEN_TVarying, self).__init__()
+
+        # Mel spectrogram layer
+        self.mel_spectrogram = transforms.MelSpectrogram(
+            sample_rate=sr,
+            n_fft=512,
+            win_length=400,
+            hop_length=160,
+            n_mels=128,
+            power=2.0,
+            normalized=True
+        )
+
+        self.n_t_constants = n_t_constants
+        
+        # Use separate TVaryingPCEN layer
+        self.tvarying_pcen = TVaryingPCEN(n_t_constants=n_t_constants, trainable=trainable)
+
+        # Batch Norm (input channels = n_t_constants)
+        self.batch_norm = nn.BatchNorm2d(n_t_constants)
+
+        # Convolutional layers
+        # First conv layer now takes n_t_constants input channels
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(n_t_constants, 8, kernel_size=(7, 7), padding='same'),
+            nn.Tanh()
+        )
+        self.pool1 = nn.MaxPool2d(kernel_size=(2, 2), padding=1)
+
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(8, 16, kernel_size=(5, 5), padding='same'),
+            nn.ReLU()
+        )
+        self.pool2 = nn.MaxPool2d(kernel_size=(2, 2), padding=1)
+
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(16, 16, kernel_size=(3, 3), padding='same'),
+            nn.ReLU()
+        )
+        self.pool3 = nn.MaxPool2d(kernel_size=(2, 2), padding=1)
+
+        self.conv4 = nn.Sequential(
+            nn.Conv2d(16, 32, kernel_size=(3, 3), padding='same'),
+            nn.ReLU()
+        )
+        self.pool4 = nn.MaxPool2d(kernel_size=(2, 2), padding=1)
+
+        self.conv5 = nn.Sequential(
+            nn.Conv2d(32, 32, kernel_size=(3, 3), padding='same'),
+            nn.ReLU()
+        )
+
+        # Calculate the flattened size
+        with torch.no_grad():
+            dummy_input = torch.randn(1, 1, int(sr * dt))
+            # Mel Spectrogram
+            dummy_mel = self.mel_spectrogram(dummy_input)
+            if dummy_mel.dim() == 4:
+                dummy_mel = dummy_mel.squeeze(1)
+            # No transpose needed for new manual layer
+            
+            # Use layer
+            dummy_stack = self.tvarying_pcen(dummy_mel)
+
+            dummy_out = self._forward_features(dummy_stack)
+            flatten_size = dummy_out.view(1, -1).size(1)
+
+
+        self.flatten = nn.Flatten()
+        self.dropout = nn.Dropout(p=0.2)
+        self.dense = nn.Linear(flatten_size, 64)
+        self.output = nn.Linear(64, n_classes)
+
+    def _forward_features(self, x):
+        x = self.conv1(x)
+        x = self.pool1(x)
+        x = self.conv2(x)
+        x = self.pool2(x)
+        x = self.conv3(x)
+        x = self.pool3(x)
+        x = self.conv4(x)
+        x = self.pool4(x)
+        x = self.conv5(x)
+        return x
+
+    def forward(self, x):
+        # x: [batch, 1, time] or [batch, time]
+        x = self.mel_spectrogram(x) # [batch, n_mels, time]
+        if x.dim() == 4:
+            x = x.squeeze(1)
+        
+        # x is now [batch, n_mels, time].
+        # Our custom PyTorchPCENLayer expects [batch, n_mels, time] or [batch, channel, n_mels, time].
+        # No transpose needed here anymore.
+
+        x = self.tvarying_pcen(x)
+        # Output is [batch, n_t_constants, n_mels, time]
+
+        x = self._forward_features(x)
+        x = self.flatten(x)
+        x = self.dropout(x)
+        x = self.dense(x)
+        x = self.output(x)
+        return x

@@ -9,7 +9,7 @@ class PCENLayer(layers.Layer):
                  delta=2.0,
                  root=0.5,
                  floor=1e-6,  # Small numerical stability constant
-                 trainable=True,
+                 trainable=False,
                  **kwargs):
         super(PCENLayer, self).__init__(**kwargs)
         self.alpha = alpha
