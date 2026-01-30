@@ -50,3 +50,4 @@ This is a comparison between PCEN and mel-log-spectrogram:
 
 
 For the Streamlit app, [click here](https://lung-classification-model.streamlit.app/).
+For the paper, [click here](https://drive.google.com/drive/u/2/folders/1aMJZcv6uV8ex09GeLsekWGUZXVM7M-st)
