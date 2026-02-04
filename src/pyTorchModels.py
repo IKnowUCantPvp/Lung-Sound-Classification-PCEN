@@ -116,7 +116,7 @@ class Conv2DPCEN(nn.Module):
         return x
 
 
-from .TVaryingPCEN import TVaryingPCEN
+from TVaryingPCEN import TVaryingPCEN
 
 class Conv2DPCEN_TVarying(nn.Module):
     def __init__(self, n_classes=10, sr=8000, dt=6.0, n_t_constants=8, trainable=True):

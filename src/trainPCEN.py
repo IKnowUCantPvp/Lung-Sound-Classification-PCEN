@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 import matplotlib.pyplot as plt
 from torch.optim import lr_scheduler
 from tqdm import tqdm
+import wandb
 
 
 class SoundDataset(Dataset):
@@ -62,6 +63,13 @@ def get_dataloaders(src_root, sample_rate, delta_time, batch_size):
         print(f"Class {label}: {count} samples")
     print(f"Total number of classes: {n_classes}\n")
 
+    # Shuffle data before splitting to ensure class distribution in both sets
+    indices = np.arange(len(wav_paths))
+    np.random.shuffle(indices)
+    
+    wav_paths = np.array(wav_paths)[indices]
+    labels = labels[indices]
+
     total_files = len(wav_paths)
     split_idx = int(total_files * 0.8)
     train_files, val_files = wav_paths[:split_idx], wav_paths[split_idx:]
@@ -104,24 +112,39 @@ def save_pcen_parameters(model, epoch, save_dir):
     params_file = os.path.join(save_dir, f'pcen_params_epoch_{epoch}.json')
     with open(params_file, 'w') as f:
         json.dump(pcen_params, f, indent=4)
+        
+    # Log PCEN params to wandb
+    wandb.log(pcen_params)
 
     return pcen_params
 
 
-def plot_prediction_distribution(pred_dist, label_encoder, save_path):
+def plot_prediction_distribution(pred_dist, label_encoder, save_path, title):
     plt.figure(figsize=(12, 6))
     plt.bar(label_encoder.classes_, pred_dist.cpu().numpy())
-    plt.title('Prediction Distribution Across Classes')
+    plt.title(title)
     plt.xticks(rotation=45)
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
+    
+    # Log plot to wandb
+    wandb.log({title: wandb.Image(save_path)})
 
+
+import argparse
 
 def main():
+    parser = argparse.ArgumentParser(description='Train PCEN Model')
+    parser.add_argument('--epochs', type=int, default=30, help='Number of epochs to train')
+    args = parser.parse_args()
+
+    # Initialize WandB
+    wandb.init(project="lung-sound-classification-pcen", name="pcen-training-run")
+    
     # Training settings
     # Updated path to match new 'data' directory structure
-    src_root = '/Users/Samer/Projects/Lung-sounds-isef/data/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)'
+    src_root = '/workspace/Lung-Sound-Classification-PCEN/Lung-Sound-Classification-PCEN/data/'
     
     # Fallback logic for robustness
     if not os.path.exists(src_root):
@@ -130,6 +153,9 @@ def main():
         if not os.path.exists(src_root):
              # Original location fallback
              src_root = '/Users/Samer/Projects/Lung-sounds-isef/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)'
+        if not os.path.exists(src_root):
+             # Fallback to local 'data' if running from project root
+             src_root = os.path.abspath('data')
 
     print(f"Using dataset path: {src_root}")
 
@@ -146,8 +172,19 @@ def main():
     batch_size = 16
     delta_time = 6.0
     sample_rate = 8000
-    num_epochs = 30
+    num_epochs = args.epochs
     learning_rate = 0.0001
+    
+    print(f"Training for {num_epochs} epochs")
+    
+    # Log config
+    wandb.config.update({
+        "batch_size": batch_size,
+        "learning_rate": learning_rate,
+        "epochs": num_epochs,
+        "sample_rate": sample_rate, 
+        "delta_time": delta_time
+    })
 
     # Get data loaders and class information
     train_loader, val_loader, n_classes, label_encoder, class_counts = get_dataloaders(
@@ -162,6 +199,9 @@ def main():
 
     # Initialize model
     model = Conv2DPCEN(n_classes=n_classes).to(device)
+    
+    # WandB watch model
+    wandb.watch(model, log="all")
 
     # Calculate class weights for balanced loss
     class_counts = torch.tensor(class_counts, dtype=torch.float32)
@@ -178,7 +218,7 @@ def main():
     criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=3, verbose=True
+        optimizer, mode='max', factor=0.5, patience=3
     )
 
     best_val_acc = 0.0
@@ -214,6 +254,9 @@ def main():
 
             # Update progress bar
             train_pbar.set_postfix({'loss': f'{loss.item():.4f}'})
+            
+            # Log batch loss
+            wandb.log({"batch_train_loss": loss.item()})
 
         avg_train_loss = running_loss / len(train_loader)
         print(f"Training Loss: {avg_train_loss:.4f}")
@@ -255,17 +298,27 @@ def main():
 
         print(f"Validation Loss: {avg_val_loss:.4f}, Accuracy: {val_acc:.2f}%")
         print("Validation prediction distribution:", val_pred_dist)
+        
+        # Log epoch metrics
+        wandb.log({
+            "epoch": epoch,
+            "train_loss": avg_train_loss,
+            "val_loss": avg_val_loss,
+            "val_accuracy": val_acc
+        })
 
         # Plot prediction distributions
         plot_prediction_distribution(
             train_pred_dist,
             label_encoder,
-            os.path.join(plots_dir, f'train_pred_dist_epoch_{epoch}.png')
+            os.path.join(plots_dir, f'train_pred_dist_epoch_{epoch}.png'),
+            f'Training Prediction Distribution Epoch {epoch}'
         )
         plot_prediction_distribution(
             val_pred_dist,
             label_encoder,
-            os.path.join(plots_dir, f'val_pred_dist_epoch_{epoch}.png')
+            os.path.join(plots_dir, f'val_pred_dist_epoch_{epoch}.png'),
+            f'Validation Prediction Distribution Epoch {epoch}'
         )
 
         # Save best model
@@ -284,6 +337,7 @@ def main():
             }
             torch.save(checkpoint, os.path.join(save_dir, 'best_model.pt'))
             print(f'Saved new best model with validation accuracy: {val_acc:.2f}%')
+            wandb.run.summary["best_val_accuracy"] = val_acc
 
         scheduler.step(val_acc)
 
