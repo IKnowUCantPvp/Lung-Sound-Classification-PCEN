@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import DataLoader
 import torch.optim as optim
 import torch.nn as nn
-from pyTorchModels import Conv2DPCEN
+from src.pyTorchModels import Conv2DPCEN_TVarying
 from glob import glob
 import os
 from sklearn.preprocessing import LabelEncoder
@@ -15,7 +15,6 @@ from torch.utils.data import DataLoader, Dataset
 import matplotlib.pyplot as plt
 from torch.optim import lr_scheduler
 from tqdm import tqdm
-import wandb
 
 
 class SoundDataset(Dataset):
@@ -32,19 +31,24 @@ class SoundDataset(Dataset):
         file_path = self.file_paths[idx]
         label = self.labels[idx]
 
-        waveform, orig_sample_rate = torchaudio.load(file_path)
-        if orig_sample_rate != self.sample_rate:
-            resampler = torchaudio.transforms.Resample(orig_sample_rate, self.sample_rate)
-            waveform = resampler(waveform)
+        try:
+            waveform, orig_sample_rate = torchaudio.load(file_path)
+            if orig_sample_rate != self.sample_rate:
+                resampler = torchaudio.transforms.Resample(orig_sample_rate, self.sample_rate)
+                waveform = resampler(waveform)
 
-        fixed_length = int(self.sample_rate * self.delta_time)
-        if waveform.size(1) > fixed_length:
-            waveform = waveform[:, :fixed_length]
-        elif waveform.size(1) < fixed_length:
-            padding = fixed_length - waveform.size(1)
-            waveform = torch.nn.functional.pad(waveform, (0, padding))
-
-        return waveform, label
+            fixed_length = int(self.sample_rate * self.delta_time)
+            if waveform.size(1) > fixed_length:
+                waveform = waveform[:, :fixed_length]
+            elif waveform.size(1) < fixed_length:
+                padding = fixed_length - waveform.size(1)
+                waveform = torch.nn.functional.pad(waveform, (0, padding))
+            
+            return waveform, label
+        except Exception as e:
+            print(f"Error loading {file_path}: {e}")
+            # Return a silent waveform of correct shape to match batch
+            return torch.zeros(1, int(self.sample_rate * self.delta_time)), label
 
 
 def get_dataloaders(src_root, sample_rate, delta_time, batch_size):
@@ -62,13 +66,6 @@ def get_dataloaders(src_root, sample_rate, delta_time, batch_size):
     for label, count in zip(label_encoder.classes_, counts):
         print(f"Class {label}: {count} samples")
     print(f"Total number of classes: {n_classes}\n")
-
-    # Shuffle data before splitting to ensure class distribution in both sets
-    indices = np.arange(len(wav_paths))
-    np.random.shuffle(indices)
-    
-    wav_paths = np.array(wav_paths)[indices]
-    labels = labels[indices]
 
     total_files = len(wav_paths)
     split_idx = int(total_files * 0.8)
@@ -98,70 +95,60 @@ def get_dataloaders(src_root, sample_rate, delta_time, batch_size):
 
 
 def save_pcen_parameters(model, epoch, save_dir):
-    pcen_layer = model.pcen
-    pcen_params = {
-        'alpha': pcen_layer.alpha.data.cpu().numpy().tolist(),
-        'delta': pcen_layer.delta.data.cpu().numpy().tolist(),
-        'root': pcen_layer.root.data.cpu().numpy().tolist() if hasattr(pcen_layer.root, 'data') else float(
-            pcen_layer.root),
-        'smooth_coef': float(pcen_layer._smooth_coef) if isinstance(pcen_layer._smooth_coef, float)
-                      else pcen_layer._smooth_coef.data.cpu().numpy().tolist(),
-        'floor': float(pcen_layer._floor)
-    }
+    # Save parameters for all PCEN layers
+    all_pcen_params = []
+    
+    # Access via tvarying_pcen module
+    for i, pcen_layer in enumerate(model.tvarying_pcen.pcen_layers):
+        pcen_params = {
+            'layer_index': i,
+            # For PyTorch Parameters, use .data.cpu().numpy().tolist() or just float()
+            'alpha': float(pcen_layer.alpha.item()),
+            'delta': float(pcen_layer.delta.item()),
+            'root': float(pcen_layer.root.item()),
+            'smooth_coef': float(pcen_layer.smooth_coef.item()),
+            'floor': float(pcen_layer.floor) # floor is a float, not parameter
+        }
+        all_pcen_params.append(pcen_params)
+
+
 
     params_file = os.path.join(save_dir, f'pcen_params_epoch_{epoch}.json')
     with open(params_file, 'w') as f:
-        json.dump(pcen_params, f, indent=4)
-        
-    # Log PCEN params to wandb
-    wandb.log(pcen_params)
+        json.dump(all_pcen_params, f, indent=4)
 
-    return pcen_params
+    return all_pcen_params
 
 
-def plot_prediction_distribution(pred_dist, label_encoder, save_path, title):
+def plot_prediction_distribution(pred_dist, label_encoder, save_path):
     plt.figure(figsize=(12, 6))
     plt.bar(label_encoder.classes_, pred_dist.cpu().numpy())
-    plt.title(title)
+    plt.title('Prediction Distribution Across Classes')
     plt.xticks(rotation=45)
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
-    
-    # Log plot to wandb
-    wandb.log({title: wandb.Image(save_path)})
 
-
-import argparse
 
 def main():
-    parser = argparse.ArgumentParser(description='Train PCEN Model')
-    parser.add_argument('--epochs', type=int, default=30, help='Number of epochs to train')
-    args = parser.parse_args()
-
-    # Initialize WandB
-    wandb.init(project="lung-sound-classification-pcen", name="pcen-training-run")
-    
     # Training settings
-    # Updated path to match new 'data' directory structure
-    src_root = '/workspace/Lung-Sound-Classification-PCEN/Lung-Sound-Classification-PCEN/data/'
+    # Updated path to match new 'data' directory structure if needed, or keeping absolute path if user didn't move it? 
+    # User moved 'CurrentDatasets' to 'data/CurrentDatasets'. Checking task.md: "Move large files to data/".
+    # Assuming user moved CurrentDatasets to data/CurrentDatasets
+    src_root = '/Users/Samer/Projects/Lung-sounds-isef/data/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)'
     
-    # Fallback logic for robustness
+    # Fallback if path doesn't exist (user might have customized move)
     if not os.path.exists(src_root):
-        print(f"Path not found: {src_root}. Checking relative location...")
-        src_root = os.path.abspath('data/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)')
+        print(f"Path not found: {src_root}. Checking original location...")
+        src_root = '/Users/Samer/Projects/Lung-sounds-isef/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)'
         if not os.path.exists(src_root):
-             # Original location fallback
-             src_root = '/Users/Samer/Projects/Lung-sounds-isef/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)'
-        if not os.path.exists(src_root):
-             # Fallback to local 'data' if running from project root
-             src_root = os.path.abspath('data')
-
+             # Try relative path
+             src_root = os.path.abspath('data/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)')
+    
     print(f"Using dataset path: {src_root}")
 
-    save_dir = 'pcen_model_checkpoints'
+    save_dir = 'pcen_t_varying_model_checkpoints'
     os.makedirs(save_dir, exist_ok=True)
-
 
     pcen_params_dir = os.path.join(save_dir, 'pcen_parameters')
     os.makedirs(pcen_params_dir, exist_ok=True)
@@ -172,19 +159,9 @@ def main():
     batch_size = 16
     delta_time = 6.0
     sample_rate = 8000
-    num_epochs = args.epochs
+    num_epochs = 30
     learning_rate = 0.0001
-    
-    print(f"Training for {num_epochs} epochs")
-    
-    # Log config
-    wandb.config.update({
-        "batch_size": batch_size,
-        "learning_rate": learning_rate,
-        "epochs": num_epochs,
-        "sample_rate": sample_rate, 
-        "delta_time": delta_time
-    })
+    n_t_constants = 8 
 
     # Get data loaders and class information
     train_loader, val_loader, n_classes, label_encoder, class_counts = get_dataloaders(
@@ -197,11 +174,8 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    # Initialize model
-    model = Conv2DPCEN(n_classes=n_classes).to(device)
-    
-    # WandB watch model
-    wandb.watch(model, log="all")
+    # Initialize model with n_t_constants
+    model = Conv2DPCEN_TVarying(n_classes=n_classes, n_t_constants=n_t_constants).to(device)
 
     # Calculate class weights for balanced loss
     class_counts = torch.tensor(class_counts, dtype=torch.float32)
@@ -218,7 +192,7 @@ def main():
     criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=3
+        optimizer, mode='max', factor=0.5, patience=3, verbose=True
     )
 
     best_val_acc = 0.0
@@ -254,9 +228,6 @@ def main():
 
             # Update progress bar
             train_pbar.set_postfix({'loss': f'{loss.item():.4f}'})
-            
-            # Log batch loss
-            wandb.log({"batch_train_loss": loss.item()})
 
         avg_train_loss = running_loss / len(train_loader)
         print(f"Training Loss: {avg_train_loss:.4f}")
@@ -298,27 +269,17 @@ def main():
 
         print(f"Validation Loss: {avg_val_loss:.4f}, Accuracy: {val_acc:.2f}%")
         print("Validation prediction distribution:", val_pred_dist)
-        
-        # Log epoch metrics
-        wandb.log({
-            "epoch": epoch,
-            "train_loss": avg_train_loss,
-            "val_loss": avg_val_loss,
-            "val_accuracy": val_acc
-        })
 
         # Plot prediction distributions
         plot_prediction_distribution(
             train_pred_dist,
             label_encoder,
-            os.path.join(plots_dir, f'train_pred_dist_epoch_{epoch}.png'),
-            f'Training Prediction Distribution Epoch {epoch}'
+            os.path.join(plots_dir, f'train_pred_dist_epoch_{epoch}.png')
         )
         plot_prediction_distribution(
             val_pred_dist,
             label_encoder,
-            os.path.join(plots_dir, f'val_pred_dist_epoch_{epoch}.png'),
-            f'Validation Prediction Distribution Epoch {epoch}'
+            os.path.join(plots_dir, f'val_pred_dist_epoch_{epoch}.png')
         )
 
         # Save best model
@@ -337,7 +298,6 @@ def main():
             }
             torch.save(checkpoint, os.path.join(save_dir, 'best_model.pt'))
             print(f'Saved new best model with validation accuracy: {val_acc:.2f}%')
-            wandb.run.summary["best_val_accuracy"] = val_acc
 
         scheduler.step(val_acc)
 
