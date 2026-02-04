@@ -217,7 +217,7 @@ class Conv2DPCEN_TVarying(nn.Module):
 
         x = self.tvarying_pcen(x)
         # Output is [batch, n_t_constants, n_mels, time]
-
+    
         x = self._forward_features(x)
         x = self.flatten(x)
         x = self.dropout(x)
