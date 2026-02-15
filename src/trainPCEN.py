@@ -1,4 +1,4 @@
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, WeightedRandomSampler
 import numpy as np
 import torchaudio
 import torch
@@ -78,11 +78,19 @@ def get_dataloaders(src_root, sample_rate, delta_time, batch_size):
     train_dataset = SoundDataset(train_files, train_labels, sample_rate, delta_time)
     val_dataset = SoundDataset(val_files, val_labels, sample_rate, delta_time)
 
+    # Calculate weights for WeightedRandomSampler
+    class_sample_counts = np.bincount(train_labels)
+    weight = 1. / class_sample_counts
+    samples_weight = np.array([weight[t] for t in train_labels])
+    samples_weight = torch.from_numpy(samples_weight)
+    sampler = WeightedRandomSampler(samples_weight.type('torch.DoubleTensor'), len(samples_weight))
+
     # Optimized DataLoaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        sampler=sampler, # Use sampler for balanced batches
+        shuffle=False,   # Must be False when sampler is provided
         num_workers=4,
         pin_memory=True
     )
@@ -114,7 +122,7 @@ def save_pcen_parameters(model, epoch, save_dir):
         json.dump(pcen_params, f, indent=4)
         
     # Log PCEN params to wandb
-    wandb.log(pcen_params)
+    wandb.log(pcen_params, step=epoch)
 
     return pcen_params
 
