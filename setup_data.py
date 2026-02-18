@@ -36,6 +36,9 @@ def organize_data():
     test_dest = os.path.abspath(os.path.join('data', 'test'))
     
     # Check for extracted folders
+    found_train = False
+    found_test = False
+
     # Train
     train_candidates = glob.glob('data/cleanTrainDataset*')
     for candidate in train_candidates:
@@ -44,6 +47,7 @@ def organize_data():
              if os.path.exists(train_dest):
                  shutil.rmtree(train_dest)
              os.rename(candidate, train_dest)
+             found_train = True
 
     # Test
     test_candidates = glob.glob('data/cleanEvaluationDataset*')
@@ -53,6 +57,7 @@ def organize_data():
              if os.path.exists(test_dest):
                  shutil.rmtree(test_dest)
              os.rename(candidate, test_dest)
+             found_test = True
 
     if not found_train and os.path.exists(train_dest):
         print("Train directory already exists.")
