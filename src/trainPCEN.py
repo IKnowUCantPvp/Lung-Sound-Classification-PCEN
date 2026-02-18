@@ -1,4 +1,4 @@
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, WeightedRandomSampler
 import numpy as np
 import torchaudio
 import torch
@@ -16,6 +16,31 @@ import matplotlib.pyplot as plt
 from torch.optim import lr_scheduler
 from tqdm import tqdm
 import wandb
+
+
+import torch.nn.functional as F
+
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        # Calculate CE loss without reduction first
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none', weight=self.alpha)
+        # Calculate probability pt = exp(-CE)
+        pt = torch.exp(-ce_loss)
+        # Calculate Focal Loss = (1-pt)^gamma * CE
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
 
 
 class SoundDataset(Dataset):
@@ -78,11 +103,19 @@ def get_dataloaders(src_root, sample_rate, delta_time, batch_size):
     train_dataset = SoundDataset(train_files, train_labels, sample_rate, delta_time)
     val_dataset = SoundDataset(val_files, val_labels, sample_rate, delta_time)
 
+    # Calculate weights for WeightedRandomSampler
+    class_sample_counts = np.bincount(train_labels)
+    weight = 1. / class_sample_counts
+    samples_weight = np.array([weight[t] for t in train_labels])
+    samples_weight = torch.from_numpy(samples_weight)
+    sampler = WeightedRandomSampler(samples_weight.type('torch.DoubleTensor'), len(samples_weight))
+
     # Optimized DataLoaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        sampler=sampler, # Use sampler for balanced batches
+        shuffle=False,   # Must be False when sampler is provided
         num_workers=4,
         pin_memory=True
     )
@@ -114,7 +147,7 @@ def save_pcen_parameters(model, epoch, save_dir):
         json.dump(pcen_params, f, indent=4)
         
     # Log PCEN params to wandb
-    wandb.log(pcen_params)
+    wandb.log(pcen_params, step=epoch)
 
     return pcen_params
 
@@ -137,25 +170,30 @@ import argparse
 def main():
     parser = argparse.ArgumentParser(description='Train PCEN Model')
     parser.add_argument('--epochs', type=int, default=30, help='Number of epochs to train')
+    parser.add_argument('--data_dir', type=str, default=None, help='Path to training data')
     args = parser.parse_args()
 
     # Initialize WandB
     wandb.init(project="lung-sound-classification-pcen", name="pcen-training-run")
     
     # Training settings
-    # Updated path to match new 'data' directory structure
-    src_root = '/workspace/Lung-Sound-Classification-PCEN/Lung-Sound-Classification-PCEN/data/'
-    
-    # Fallback logic for robustness
-    if not os.path.exists(src_root):
-        print(f"Path not found: {src_root}. Checking relative location...")
-        src_root = os.path.abspath('data/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)')
+    # Training settings
+    if args.data_dir:
+        src_root = args.data_dir
+    else:
+        # Fallback/Default logic
+        src_root = '/workspace/Lung-Sound-Classification-PCEN/Lung-Sound-Classification-PCEN/data/'
+        
+        # Fallback logic for robustness
         if not os.path.exists(src_root):
-             # Original location fallback
-             src_root = '/Users/Samer/Projects/Lung-sounds-isef/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)'
-        if not os.path.exists(src_root):
-             # Fallback to local 'data' if running from project root
-             src_root = os.path.abspath('data')
+            print(f"Path not found: {src_root}. Checking relative location...")
+            src_root = os.path.abspath('data/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)')
+            if not os.path.exists(src_root):
+                 # Original location fallback
+                 src_root = '/Users/Samer/Projects/Lung-sounds-isef/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)'
+            if not os.path.exists(src_root):
+                 # Fallback to local 'data' if running from project root
+                 src_root = os.path.abspath('data')
 
     print(f"Using dataset path: {src_root}")
 
@@ -215,7 +253,9 @@ def main():
     print()
 
     # Loss and optimizer
-    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+    # Loss and optimizer
+    # criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+    criterion = FocalLoss(alpha=class_weights, gamma=2.0)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', factor=0.5, patience=3
