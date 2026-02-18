@@ -15,6 +15,7 @@ import pandas as pd
 from scipy.io import wavfile
 from sklearn.preprocessing import LabelEncoder
 import torchaudio
+import wandb
 
 
 def parse_args():
@@ -288,8 +289,25 @@ def evaluate_model(model_path, data_dir, model_name, device, sr=8000, dt=6.0, ba
             plt.grid(True)
             plt.savefig(f'roc_curves_{model_name}.png', bbox_inches='tight')
             plt.close()
+
+            # Log to WandB
+            wandb.log({
+                f"confusion_matrix_{model_name}": wandb.Image(f'confusion_matrix_{model_name}.png'),
+                f"roc_curves_{model_name}": wandb.Image(f'roc_curves_{model_name}.png'),
+                f"accuracy_{model_name}": metrics['accuracy'],
+                f"precision_{model_name}": metrics['precision'],
+                f"recall_{model_name}": metrics['recall'],
+                f"f1_score_{model_name}": metrics['f1_score'],
+                f"auc_ovr_{model_name}": metrics['auc_ovr'],
+                f"loss_{model_name}": metrics['loss']
+            })
+            
+            # Log per-class AUC
+            for i, class_auc in enumerate(metrics['auc_per_class']):
+                 wandb.log({f"auc_{classes[i]}_{model_name}": class_auc})
+
         except Exception as e:
-            print(f"Warning: Could not generate plots: {str(e)}")
+            print(f"Warning: Could not generate plots or log to wandb: {str(e)}")
 
         return metrics
 
@@ -313,6 +331,11 @@ def find_model_files(base_dir):
 
 if __name__ == "__main__":
     args = parse_args()
+    
+    # Initialize WandB
+    wandb.init(project="lung-sound-classification-pcen", name="evaluation-run", job_type="evaluation")
+    wandb.config.update(args)
+
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
