@@ -18,6 +18,31 @@ from tqdm import tqdm
 import wandb
 
 
+import torch.nn.functional as F
+
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        # Calculate CE loss without reduction first
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none', weight=self.alpha)
+        # Calculate probability pt = exp(-CE)
+        pt = torch.exp(-ce_loss)
+        # Calculate Focal Loss = (1-pt)^gamma * CE
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+
 class SoundDataset(Dataset):
     def __init__(self, file_paths, labels, sample_rate, delta_time):
         self.file_paths = file_paths
@@ -223,7 +248,9 @@ def main():
     print()
 
     # Loss and optimizer
-    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+    # Loss and optimizer
+    # criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+    criterion = FocalLoss(alpha=class_weights, gamma=2.0)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', factor=0.5, patience=3

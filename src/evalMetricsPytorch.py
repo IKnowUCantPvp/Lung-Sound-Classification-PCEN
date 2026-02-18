@@ -366,7 +366,3 @@ if __name__ == "__main__":
     else:
         print("\nNo models were successfully evaluated.")
 
-
-if __name__ == "__main__":
-    args = parse_args()
-    evaluate_model(args)
