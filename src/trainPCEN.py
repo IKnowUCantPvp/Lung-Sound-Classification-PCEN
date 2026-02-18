@@ -170,25 +170,30 @@ import argparse
 def main():
     parser = argparse.ArgumentParser(description='Train PCEN Model')
     parser.add_argument('--epochs', type=int, default=30, help='Number of epochs to train')
+    parser.add_argument('--data_dir', type=str, default=None, help='Path to training data')
     args = parser.parse_args()
 
     # Initialize WandB
     wandb.init(project="lung-sound-classification-pcen", name="pcen-training-run")
     
     # Training settings
-    # Updated path to match new 'data' directory structure
-    src_root = '/workspace/Lung-Sound-Classification-PCEN/Lung-Sound-Classification-PCEN/data/'
-    
-    # Fallback logic for robustness
-    if not os.path.exists(src_root):
-        print(f"Path not found: {src_root}. Checking relative location...")
-        src_root = os.path.abspath('data/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)')
+    # Training settings
+    if args.data_dir:
+        src_root = args.data_dir
+    else:
+        # Fallback/Default logic
+        src_root = '/workspace/Lung-Sound-Classification-PCEN/Lung-Sound-Classification-PCEN/data/'
+        
+        # Fallback logic for robustness
         if not os.path.exists(src_root):
-             # Original location fallback
-             src_root = '/Users/Samer/Projects/Lung-sounds-isef/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)'
-        if not os.path.exists(src_root):
-             # Fallback to local 'data' if running from project root
-             src_root = os.path.abspath('data')
+            print(f"Path not found: {src_root}. Checking relative location...")
+            src_root = os.path.abspath('data/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)')
+            if not os.path.exists(src_root):
+                 # Original location fallback
+                 src_root = '/Users/Samer/Projects/Lung-sounds-isef/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)'
+            if not os.path.exists(src_root):
+                 # Fallback to local 'data' if running from project root
+                 src_root = os.path.abspath('data')
 
     print(f"Using dataset path: {src_root}")
 
