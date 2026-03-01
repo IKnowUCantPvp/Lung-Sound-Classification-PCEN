@@ -1,3 +1,4 @@
+import torch_audio_backend
 from torch.utils.data import Dataset, WeightedRandomSampler
 import numpy as np
 import torchaudio
@@ -72,38 +73,36 @@ class SoundDataset(Dataset):
         return waveform, label
 
 
-def get_dataloaders(src_root, sample_rate, delta_time, batch_size):
-    wav_paths = glob(f'{src_root}/**/*.wav', recursive=True)
-    labels = [os.path.basename(os.path.dirname(path)) for path in wav_paths]
+def get_dataloaders(train_dir, val_dir, sample_rate, delta_time, batch_size):
+    # Train Data
+    train_paths = glob(f'{train_dir}/**/*.wav', recursive=True)
+    train_labels_raw = [os.path.basename(os.path.dirname(path)) for path in train_paths]
+    
+    # Val Data
+    val_paths = glob(f'{val_dir}/**/*.wav', recursive=True)
+    val_labels_raw = [os.path.basename(os.path.dirname(path)) for path in val_paths]
 
+    # Fit label encoder on unique classes from train directory to ensure consistency
+    classes = sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
     label_encoder = LabelEncoder()
-    labels = label_encoder.fit_transform(labels)
+    label_encoder.fit(classes)
+    
+    train_labels = label_encoder.transform(train_labels_raw)
+    val_labels = label_encoder.transform(val_labels_raw)
 
     # Calculate n_classes and get class distribution
     n_classes = len(label_encoder.classes_)
-    unique_labels, counts = np.unique(labels, return_counts=True)
+    unique_labels, counts = np.unique(train_labels, return_counts=True)
 
-    print("\nClass Distribution:")
+    print("\nClass Distribution (Training):")
     for label, count in zip(label_encoder.classes_, counts):
         print(f"Class {label}: {count} samples")
     print(f"Total number of classes: {n_classes}\n")
-
-    # Shuffle data before splitting to ensure class distribution in both sets
-    indices = np.arange(len(wav_paths))
-    np.random.shuffle(indices)
     
-    wav_paths = np.array(wav_paths)[indices]
-    labels = labels[indices]
+    train_dataset = SoundDataset(train_paths, train_labels, sample_rate, delta_time)
+    val_dataset = SoundDataset(val_paths, val_labels, sample_rate, delta_time)
 
-    total_files = len(wav_paths)
-    split_idx = int(total_files * 0.8)
-    train_files, val_files = wav_paths[:split_idx], wav_paths[split_idx:]
-    train_labels, val_labels = labels[:split_idx], labels[split_idx:]
-
-    train_dataset = SoundDataset(train_files, train_labels, sample_rate, delta_time)
-    val_dataset = SoundDataset(val_files, val_labels, sample_rate, delta_time)
-
-    # Calculate weights for WeightedRandomSampler
+    # Calculate weights for WeightedRandomSampler (Train only)
     class_sample_counts = np.bincount(train_labels)
     weight = 1. / class_sample_counts
     samples_weight = np.array([weight[t] for t in train_labels])
@@ -132,14 +131,16 @@ def get_dataloaders(src_root, sample_rate, delta_time, batch_size):
 
 def save_pcen_parameters(model, epoch, save_dir):
     pcen_layer = model.pcen
+    
+    # Handle the new CustomPCEN layer where smooth_coef is trainable and clamped
+    smooth_coef_data = torch.clamp(pcen_layer.smooth_coef, 0.0, 1.0).data.cpu().numpy().tolist()
+    
     pcen_params = {
-        'alpha': pcen_layer.alpha.data.cpu().numpy().tolist(),
-        'delta': pcen_layer.delta.data.cpu().numpy().tolist(),
-        'root': pcen_layer.root.data.cpu().numpy().tolist() if hasattr(pcen_layer.root, 'data') else float(
-            pcen_layer.root),
-        'smooth_coef': float(pcen_layer._smooth_coef) if isinstance(pcen_layer._smooth_coef, float)
-                      else pcen_layer._smooth_coef.data.cpu().numpy().tolist(),
-        'floor': float(pcen_layer._floor)
+        'alpha': float(pcen_layer.alpha),
+        'delta': float(pcen_layer.delta),
+        'root': float(pcen_layer.root),
+        'smooth_coef': smooth_coef_data,
+        'floor': float(pcen_layer.floor)
     }
 
     params_file = os.path.join(save_dir, f'pcen_params_epoch_{epoch}.json')
@@ -171,31 +172,26 @@ def main():
     parser = argparse.ArgumentParser(description='Train PCEN Model')
     parser.add_argument('--epochs', type=int, default=30, help='Number of epochs to train')
     parser.add_argument('--data_dir', type=str, default=None, help='Path to training data')
+    parser.add_argument('--val_dir', type=str, default=None, help='Path to validation data')
     args = parser.parse_args()
 
     # Initialize WandB
     wandb.init(project="lung-sound-classification-pcen", name="pcen-training-run")
     
     # Training settings
-    # Training settings
     if args.data_dir:
-        src_root = args.data_dir
+        train_dir = args.data_dir
     else:
         # Fallback/Default logic
-        src_root = '/workspace/Lung-Sound-Classification-PCEN/Lung-Sound-Classification-PCEN/data/'
-        
-        # Fallback logic for robustness
-        if not os.path.exists(src_root):
-            print(f"Path not found: {src_root}. Checking relative location...")
-            src_root = os.path.abspath('data/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)')
-            if not os.path.exists(src_root):
-                 # Original location fallback
-                 src_root = '/Users/Samer/Projects/Lung-sounds-isef/CurrentDatasets/CleanDatasets (10 classes)/cleanTrainDataset (nonoise and COPD cut)'
-            if not os.path.exists(src_root):
-                 # Fallback to local 'data' if running from project root
-                 src_root = os.path.abspath('data')
+        train_dir = '/workspace/Lung-Sound-Classification-PCEN/Lung-Sound-Classification-PCEN/data/train'
+    
+    if args.val_dir:
+        val_dir = args.val_dir
+    else:
+         val_dir = '/workspace/Lung-Sound-Classification-PCEN/Lung-Sound-Classification-PCEN/data/test'
 
-    print(f"Using dataset path: {src_root}")
+    print(f"Using training data: {train_dir}")
+    print(f"Using validation data: {val_dir}")
 
     save_dir = 'pcen_model_checkpoints'
     os.makedirs(save_dir, exist_ok=True)
@@ -221,12 +217,15 @@ def main():
         "learning_rate": learning_rate,
         "epochs": num_epochs,
         "sample_rate": sample_rate, 
-        "delta_time": delta_time
+        "delta_time": delta_time,
+        "train_dir": train_dir,
+        "val_dir": val_dir
     })
 
     # Get data loaders and class information
     train_loader, val_loader, n_classes, label_encoder, class_counts = get_dataloaders(
-        src_root,
+        train_dir,
+        val_dir,
         sample_rate,
         delta_time,
         batch_size
@@ -255,7 +254,7 @@ def main():
     # Loss and optimizer
     # Loss and optimizer
     # criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
-    criterion = FocalLoss(alpha=class_weights, gamma=2.0)
+    criterion = FocalLoss(alpha=None, gamma=2.0)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', factor=0.5, patience=3
@@ -340,11 +339,13 @@ def main():
         print("Validation prediction distribution:", val_pred_dist)
         
         # Log epoch metrics
+        current_lr = optimizer.param_groups[0]['lr']
         wandb.log({
             "epoch": epoch,
             "train_loss": avg_train_loss,
             "val_loss": avg_val_loss,
-            "val_accuracy": val_acc
+            "val_accuracy": val_acc,
+            "learning_rate": current_lr
         })
 
         # Plot prediction distributions

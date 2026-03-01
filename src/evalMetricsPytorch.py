@@ -1,3 +1,4 @@
+import torch_audio_backend
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -77,18 +78,37 @@ class AudioDataset(Dataset):
 
     def __getitem__(self, idx):
         try:
-            # Load audio file
-            rate, wav = wavfile.read(self.wav_paths[idx])
+            # Load audio file using torchaudio (normalizes to [-1, 1] and handles resampling)
+            waveform, sample_rate = torchaudio.load(self.wav_paths[idx])
+            
+            # Resample if necessary
+            if sample_rate != self.sr:
+                resampler = torchaudio.transforms.Resample(sample_rate, self.sr)
+                waveform = resampler(waveform)
+
+            # Ensure mono
+            if waveform.shape[0] > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
+
             target_length = int(self.sr * self.dt)
+            
+            # Waveform is (Channels, Time). We want (Time,) or (1, Time)? 
+            # Conv2DPCEN expects input of shape (Batch, 1, Time) or (Batch, Time) depending on implementation.
+            # trainPCEN.py produces (1, Time) from torchaudio.load
+            
+            if waveform.shape[1] > target_length:
+                waveform = waveform[:, :target_length]
+            elif waveform.shape[1] < target_length:
+                padding = target_length - waveform.shape[1]
+                waveform = torch.nn.functional.pad(waveform, (0, padding))
 
-            # Trim or pad as needed
-            if len(wav) > target_length:
-                wav = wav[:target_length]
-            elif len(wav) < target_length:
-                wav = np.pad(wav, (0, target_length - len(wav)))
-
-            # Convert to torch tensor
-            x = torch.FloatTensor(wav)
+            # Remove channel dim to match trainPCEN.py behavior if needed?
+            # trainPCEN.py: waveform, label = ...
+            # torchaudio.load returns (C, T). 
+            # trainPCEN.py's SoundDataset returns (C, T) -> DataLoader stacks to (B, C, T).
+            # The model is Conv2DPCEN.
+            
+            x = waveform
 
             # Create label tensor
             label = torch.zeros(self.n_classes)
@@ -98,7 +118,7 @@ class AudioDataset(Dataset):
 
         except Exception as e:
             print(f"Error processing file {self.wav_paths[idx]}: {str(e)}")
-            return torch.zeros(target_length), torch.zeros(self.n_classes)
+            return torch.zeros(1, int(self.sr * self.dt)), torch.zeros(self.n_classes)
 
 
 def load_pt_model(model_path):
